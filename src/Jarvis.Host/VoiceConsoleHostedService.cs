@@ -9,6 +9,7 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
     private readonly RealtimeVoiceCoordinator _coordinator;
     private readonly VoiceOptions _options;
     private readonly LocalAiOptions _localAiOptions;
+    private readonly ToolOptions _toolOptions;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger<VoiceConsoleHostedService> _logger;
 
@@ -16,12 +17,14 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
         RealtimeVoiceCoordinator coordinator,
         IOptions<VoiceOptions> options,
         IOptions<LocalAiOptions> localAiOptions,
+        IOptions<ToolOptions> toolOptions,
         IHostApplicationLifetime applicationLifetime,
         ILogger<VoiceConsoleHostedService> logger)
     {
         _coordinator = coordinator;
         _options = options.Value;
         _localAiOptions = localAiOptions.Value;
+        _toolOptions = toolOptions.Value;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
     }
@@ -264,7 +267,7 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
 
     private void WriteHelp()
     {
-        Console.WriteLine("JARVIS local 0.1.1 voice console");
+        Console.WriteLine("JARVIS local 0.2 voice and typed-tool console");
         Console.WriteLine("/start  start a session manually (diagnostics)");
         Console.WriteLine("/stop   stop the active session");
         Console.WriteLine("/ptt    begin push-to-talk capture (push-to-talk mode)");
@@ -281,6 +284,16 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
         else if (!_options.Enabled)
         {
             Console.WriteLine("Microphone input is disabled; text debugging remains available.");
+        }
+
+        if (!_toolOptions.Enabled)
+        {
+            Console.WriteLine("Computer tools are disabled; conversation remains available.");
+        }
+        else if (_toolOptions.AllowedRoots.Count == 0)
+        {
+            Console.WriteLine(
+                "Filesystem tools are denied until at least one absolute Tools:AllowedRoots entry is configured.");
         }
     }
 

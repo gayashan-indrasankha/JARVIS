@@ -1,15 +1,29 @@
 namespace Jarvis.Core.Voice;
 
-/// <summary>
-/// Provider-neutral language generation boundary. Implementations must not expose transport types.
-/// </summary>
-public interface ILanguageModel : IAsyncDisposable
+public interface IAgentRuntime : IAsyncDisposable
 {
     public ValueTask InitializeAsync(CancellationToken cancellationToken);
 
     public IAsyncEnumerable<LanguageModelToken> GenerateAsync(
         LanguageModelRequest request,
+        Guid userRequestId,
         CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Provider-neutral language generation boundary. Implementations must not expose transport types.
+/// </summary>
+public interface ILanguageModel : IAgentRuntime
+{
+    public IAsyncEnumerable<LanguageModelToken> GenerateAsync(
+        LanguageModelRequest request,
+        CancellationToken cancellationToken);
+
+    IAsyncEnumerable<LanguageModelToken> IAgentRuntime.GenerateAsync(
+        LanguageModelRequest request,
+        Guid userRequestId,
+        CancellationToken cancellationToken) =>
+        GenerateAsync(request, cancellationToken);
 }
 
 public sealed record LanguageModelRequest

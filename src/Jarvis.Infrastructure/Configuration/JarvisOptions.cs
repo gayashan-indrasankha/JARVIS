@@ -124,3 +124,20 @@ public sealed class ResponseSegmentationOptions
 
     public int MaximumSegmentCharacters { get; set; } = 240;
 }
+
+public sealed class ToolOptions
+{
+    public const string SectionName = "Tools";
+
+    public bool Enabled { get; set; } = true;
+
+    public bool AllowSafeLocalActions { get; set; } = true;
+
+    public int MaximumToolSteps { get; set; } = 4;
+
+    public int MaximumResultCharacters { get; set; } = 16 * 1024;
+
+    public int DefaultTimeoutSeconds { get; set; } = 10;
+
+    public List<string> AllowedRoots { get; set; } = [];
+}

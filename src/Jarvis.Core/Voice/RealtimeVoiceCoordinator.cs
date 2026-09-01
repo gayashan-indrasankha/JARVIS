@@ -171,7 +171,7 @@ public sealed partial class RealtimeVoiceCoordinator : IAsyncDisposable
     private const int MaximumHistoryCharacters = 24 * 1024;
     private const int MaximumPreRollFrames = 10;
 
-    private readonly ILanguageModel _languageModel;
+    private readonly IAgentRuntime _agentRuntime;
     private readonly IAudioCapture _capture;
     private readonly IAudioPlayback _playback;
     private readonly IVoiceActivityDetector _voiceActivityDetector;
@@ -201,7 +201,7 @@ public sealed partial class RealtimeVoiceCoordinator : IAsyncDisposable
     private VoiceCaptureState _captureState;
 
     public RealtimeVoiceCoordinator(
-        ILanguageModel languageModel,
+        IAgentRuntime agentRuntime,
         IAudioCapture capture,
         IAudioPlayback playback,
         IVoiceActivityDetector voiceActivityDetector,
@@ -211,7 +211,7 @@ public sealed partial class RealtimeVoiceCoordinator : IAsyncDisposable
         IWakeWordDetector? wakeWordDetector = null,
         TimeProvider? timeProvider = null)
     {
-        _languageModel = languageModel ?? throw new ArgumentNullException(nameof(languageModel));
+        _agentRuntime = agentRuntime ?? throw new ArgumentNullException(nameof(agentRuntime));
         _capture = capture ?? throw new ArgumentNullException(nameof(capture));
         _playback = playback ?? throw new ArgumentNullException(nameof(playback));
         _voiceActivityDetector = voiceActivityDetector ??
@@ -527,7 +527,7 @@ public sealed partial class RealtimeVoiceCoordinator : IAsyncDisposable
         await _voiceActivityDetector.DisposeAsync().ConfigureAwait(false);
         await _speechRecognizer.DisposeAsync().ConfigureAwait(false);
         await _speechSynthesizer.DisposeAsync().ConfigureAwait(false);
-        await _languageModel.DisposeAsync().ConfigureAwait(false);
+        await _agentRuntime.DisposeAsync().ConfigureAwait(false);
     }
 
     private void StartCapturePump(
@@ -725,6 +725,7 @@ public sealed partial class RealtimeVoiceCoordinator : IAsyncDisposable
         _retiredGenerationTasks.RemoveAll(static task => task.IsCompleted);
         _generationTask = RunGenerationAsync(
             generationId,
+            Guid.NewGuid(),
             request,
             configuration.SpeechOutputEnabled,
             generationToken);
@@ -733,6 +734,7 @@ public sealed partial class RealtimeVoiceCoordinator : IAsyncDisposable
 
     private async Task RunGenerationAsync(
         long generationId,
+        Guid userRequestId,
         LanguageModelRequest request,
         bool speechOutputEnabled,
         CancellationToken cancellationToken)
@@ -755,7 +757,8 @@ public sealed partial class RealtimeVoiceCoordinator : IAsyncDisposable
         try
         {
             await foreach (LanguageModelToken token in
-                _languageModel.GenerateAsync(request, cancellationToken).ConfigureAwait(false))
+                _agentRuntime.GenerateAsync(request, userRequestId, cancellationToken)
+                    .ConfigureAwait(false))
             {
                 foreach (string segment in segmenter.Append(token.Text))
                 {

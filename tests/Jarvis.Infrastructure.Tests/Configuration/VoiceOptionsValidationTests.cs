@@ -15,12 +15,15 @@ public sealed class VoiceOptionsValidationTests
 
         LocalAiOptions localAi = provider.GetRequiredService<IOptions<LocalAiOptions>>().Value;
         VoiceOptions voice = provider.GetRequiredService<IOptions<VoiceOptions>>().Value;
+        ToolOptions tools = provider.GetRequiredService<IOptions<ToolOptions>>().Value;
 
         Assert.True(localAi.Enabled);
         Assert.Equal("127.0.0.1", localAi.Host);
         Assert.False(voice.Enabled);
         Assert.False(voice.WakeWord.AlwaysListeningEnabled);
         Assert.Equal("Jarvis", voice.WakeWord.Phrase);
+        Assert.True(tools.Enabled);
+        Assert.Empty(tools.AllowedRoots);
     }
 
     [Theory]
@@ -50,6 +53,10 @@ public sealed class VoiceOptionsValidationTests
     [InlineData("Voice:WakeWord:ContinuationWindowSeconds", "1")]
     [InlineData("LocalAi:ContextSize", "2048")]
     [InlineData("LocalAi:Threads", "0")]
+    [InlineData("Tools:MaximumToolSteps", "9")]
+    [InlineData("Tools:MaximumResultCharacters", "100")]
+    [InlineData("Tools:DefaultTimeoutSeconds", "0")]
+    [InlineData("Tools:AllowedRoots:0", "relative/path")]
     [InlineData("Jarvis:InstanceName", "unsafe instance\nname")]
     public void InvalidResourceConfigurationFailsValidation(string key, string value)
     {
@@ -65,6 +72,10 @@ public sealed class VoiceOptionsValidationTests
             else if (key.StartsWith("LocalAi:", StringComparison.Ordinal))
             {
                 _ = provider.GetRequiredService<IOptions<LocalAiOptions>>().Value;
+            }
+            else if (key.StartsWith("Tools:", StringComparison.Ordinal))
+            {
+                _ = provider.GetRequiredService<IOptions<ToolOptions>>().Value;
             }
             else
             {
