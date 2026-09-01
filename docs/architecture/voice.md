@@ -1,6 +1,6 @@
 # Local voice architecture
 
-Version 0.1.1 is a fully local, interruptible Windows voice vertical slice with dormant keyword activation. Core owns orchestration and provider-neutral contracts; Infrastructure owns llama.cpp, sherpa-onnx, NAudio, native lifetime, and local HTTP details. The wake-word port remains replaceable.
+Version 0.2 is a fully local, interruptible Windows voice vertical slice with dormant keyword activation and permission-controlled tools. Core owns orchestration, the provider-neutral agent loop, and tool contracts; Infrastructure owns llama.cpp, sherpa-onnx, NAudio, tool adapters, native lifetime, and local HTTP details. The wake-word and model ports remain replaceable.
 
 ## Pipeline
 
@@ -12,14 +12,16 @@ Windows microphone (16 kHz PCM16 mono)
   -> bounded capture stream
   -> Silero VAD (CPU, active even while JARVIS speaks)
   -> streaming Zipformer ASR (CPU; partial and final text)
-  -> ILanguageModel
-  -> llama.cpp loopback streaming generation (Qwen3 /no_think)
+  -> IAgentRuntime
+  -> llama.cpp schema-constrained plan (respond or typed tool proposal)
+  -> ToolDispatcher: validation -> authorization -> bounded execution -> audit
+  -> llama.cpp loopback streaming final generation (Qwen3 /no_think)
   -> incremental response segmenter
   -> Kokoro TTS (CPU, ordered bounded queue, 24 kHz PCM16 mono)
   -> Windows speaker
 ```
 
-Text input bypasses capture/VAD/ASR but uses the same language model, segmenter, and—unless disabled—TTS. Push-to-talk starts capture only after `/ptt`, finalizes ASR at `/send`, and otherwise follows the same pipeline. `/start` bypasses wake detection for diagnostics. When push-to-talk is used while sleeping, Host starts a push-to-talk conversation without requiring the phrase.
+Text input bypasses capture/VAD/ASR but uses the same agent, tool, segmenter, and—unless disabled—TTS path. Push-to-talk starts capture only after `/ptt`, finalizes ASR at `/send`, and otherwise follows the same pipeline. `/start` bypasses wake detection for diagnostics. When push-to-talk is used while sleeping, Host starts a push-to-talk conversation without requiring the phrase.
 
 ## Wake and continuation lifecycle
 
@@ -37,7 +39,7 @@ Cooldown suppresses a new detection that arrives too soon after the last accepte
 
 ## Core contracts and ownership
 
-`ILanguageModel`, `IVoiceActivityDetector`, `ISpeechRecognizer`, `ISpeechSynthesizer`, `IAudioCapture`, `IAudioPlayback`, `IWakeWordDetector`, and `IVoiceMetrics` expose bounded domain records and cancellation tokens. They contain no native handles, HTTP messages, llama.cpp request objects, sherpa-onnx types, NAudio types, or logging framework types.
+`IAgentRuntime`, `ILanguageModel`, `IAgentPlanner`, `IToolDispatcher`, `IVoiceActivityDetector`, `ISpeechRecognizer`, `ISpeechSynthesizer`, `IAudioCapture`, `IAudioPlayback`, `IWakeWordDetector`, and `IVoiceMetrics` expose bounded domain records and cancellation tokens. They contain no native handles, HTTP messages, llama.cpp request objects, sherpa-onnx types, NAudio types, or logging framework types.
 
 `RealtimeVoiceCoordinator` owns:
 
@@ -45,7 +47,7 @@ Cooldown suppresses a new detection that arrives too soon after the last accepte
 - bounded in-memory conversation history and response size limits;
 - a ten-frame microphone pre-roll for retaining speech onset;
 - VAD-to-ASR turn finalization and partial/final transcript notifications;
-- language generation and a single ordered synthesis consumer;
+- correlated agent/tool generation and a single ordered synthesis consumer;
 - generation IDs, linked cancellation, stale-output rejection, and playback interruption;
 - structured content-free timing metrics.
 
@@ -53,7 +55,9 @@ The coordinator initializes only required components. Initial dormant mode does 
 
 ## Local language inference
 
-`LlamaCppLocalLanguageModel` implements Core's language port. The adapter requests a persistent supervised connection and streams server-sent completion deltas from fixed loopback HTTP. It adds Qwen's `/no_think` control to the user turn, accepts only visible `content`, ignores `reasoning_content`, bounds each event and aggregate visible output, and never registers OS tools.
+`LlamaCppLocalLanguageModel` implements Core's final language-generation port. The adapter requests a persistent supervised connection and streams server-sent completion deltas from fixed loopback HTTP. It adds Qwen's `/no_think` control to the user turn, accepts only visible `content`, ignores `reasoning_content`, and bounds each event and aggregate visible output.
+
+`LlamaCppAgentPlanner` is a separate Infrastructure adapter. It requests non-streaming schema-constrained JSON with exactly one of `respond` or one reviewed tool contract. It registers no llama.cpp native executable tool and holds no executor/authorization/audit reference. Core's `ToolEnabledAgentRuntime` applies a maximum-step and identical-call policy, dispatches proposals through the tool kernel, labels successful results as untrusted data, then delegates confirmed history to the streaming language adapter. A malformed plan receives one constrained repair request; a second failure executes nothing. Failed, denied, invalid, repeated, timed-out, or unavailable outcomes use deterministic non-success wording instead of allowing the model to hallucinate completion.
 
 Managed `LlamaServerSupervisor`:
 
@@ -84,7 +88,7 @@ NAudio WinMM adapters retain default/configured numeric input/output devices. Ca
 
 The segmenter consumes generation deltas and emits short speech units at sentence boundaries, then clause/maximum-size boundaries. It delays a small suffix so hidden-reasoning/code markers split across deltas cannot leak. Before user display/TTS it removes code fences and contents, `<think>`/`<analysis>` contents, inline formatting/control characters, and tool/function metadata-shaped segments. The adapter also discards model `reasoning_content`; defense therefore exists at both protocol and presentation boundaries.
 
-No sanitizer is a general trust boundary. Model output remains untrusted and 0.1 has no tool execution path.
+No sanitizer is a general trust boundary. Model output and tool observations remain untrusted. Content from files, repositories, terminals, websites, and documents cannot change policy, grant permission, or invoke an action; every new proposal traverses the same validation/authorization dispatcher. JARVIS does not narrate an action as successful unless the typed executor outcome confirms success.
 
 ## Barge-in and cancellation invariant
 
@@ -117,4 +121,4 @@ Unit tests use fake ports/processes/HTTP handlers; they verify wake state, lazy 
 - physical wake threshold/distance/noise profiling and idle battery measurement;
 - accent/noise benchmarks and alternate local ASR profiles;
 - packaging/signed update workflow and an authoritative hash for every upstream archive;
-- tools, project indexing, memory, UI automation, and persistence.
+- tool writes/deletion/interactive approvals, project indexing, memory, UI automation, and persistence.

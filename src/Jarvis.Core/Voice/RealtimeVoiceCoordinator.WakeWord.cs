@@ -69,7 +69,7 @@ public sealed partial class RealtimeVoiceCoordinator
         VoiceSessionConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        await _languageModel.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _agentRuntime.InitializeAsync(cancellationToken).ConfigureAwait(false);
         if (configuration.SpeechInputEnabled)
         {
             await _voiceActivityDetector.InitializeAsync(cancellationToken).ConfigureAwait(false);

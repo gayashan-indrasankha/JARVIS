@@ -4,6 +4,7 @@
 [Aa]rtifacts/
 [Tt]est[Rr]esults/
 coverage/
+.jarvis-tool-tests/
 *.coverage
 *.coveragexml
 *.dmp

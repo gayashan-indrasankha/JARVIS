@@ -23,7 +23,7 @@ Milestones are capability gates, not calendar promises. Each increment must reta
 
 Exit requires automated gates plus the [manual local voice test](../testing/manual-voice-smoke-test.md) on target hardware. Physical voice/offline claims remain manual until executed.
 
-## 0.1.1 — Local activation and realtime polish (current)
+## 0.1.1 — Local activation and realtime polish (complete in code)
 
 - replaceable local open-vocabulary “Jarvis” keyword spotter with pinned sherpa-onnx GigaSpeech model;
 - dormant/activating/listening/conversation lifecycle with cooldown and continuation window;
@@ -38,18 +38,23 @@ Exit requires the automated gates plus the wake-word matrix on target hardware. 
 - benchmark alternative local ASR profiles for accents and noisy rooms;
 - evaluate WASAPI and reliable local echo cancellation without weakening barge-in.
 
-## 0.2 — Typed tool and authorization kernel
+## 0.2 — Permission-controlled local computer agent (current)
 
 - strongly typed tool descriptions, requests, results, cancellation, and timeouts;
-- centralized authorization decisions and explicit user approval surface;
-- append-only structured audit events with redaction and correlation IDs;
-- no shell/filesystem/process implementation until bypass-resistance is tested.
+- exact trusted catalog, closed JSON schemas, validation before centralized authorization, and authorization before execution;
+- append-oriented structured audit events with content minimization and request/invocation correlation IDs;
+- approved-root bounded filesystem reads, visible file/folder open, fixed application launch, bounded process/system metrics, read-only Git status, and fixed diagnostic commands;
+- schema-constrained local llama.cpp planning, one repair attempt, tool-step/duplicate/result limits, and untrusted-result labeling;
+- no writes, deletion, credential access, arbitrary shell/arguments, elevation, UI automation, network tools, or model-to-OS bypass.
 
-## 0.3 — Controlled Windows capabilities
+The originally planned harmless-kernel and Windows-adapter milestones are combined for the required acceptance demonstrations; [ADR 0004](../decisions/0004-permission-controlled-local-tool-kernel.md) records the constrained boundary. Exit requires automated gates plus the [manual tool smoke test](../testing/manual-tool-smoke-test.md). Real window opening and local-model selection remain manual until executed on the target desktop.
 
-- scoped filesystem, process/application, system information, and safe shell tools;
-- path canonicalization, command injection defenses, least privilege, and dry-run/preview;
-- Windows-specific code behind platform interfaces; destructive tests use fakes/temp resources.
+## 0.3 — Approval surface and controlled mutation
+
+- explicit and strong confirmation UI with exact-request grants and expiry;
+- durable tamper-resistant audit storage, review, retention, and privacy controls;
+- carefully scoped file writes/changes and additional process/application actions with preview/rollback where practical;
+- no general administrator shell; destructive capabilities require separate decisions and safe test strategies.
 
 ## 0.4 — Project intelligence
 
@@ -76,4 +81,4 @@ Exit requires the automated gates plus the wake-word matrix on target hardware. 
 - Local model quality, ASR accuracy, and TTS latency vary with hardware and acoustics.
 - Native runtime/model downloads are a supply-chain boundary; missing authoritative hashes must stay visible.
 - Voice barge-in without echo cancellation works best with headphones.
-- Future OS tools expand impact and must never reuse the model/runtime boundary as authorization.
+- New OS tools expand impact and must reuse the typed dispatcher; model/runtime boundaries never authorize actions.

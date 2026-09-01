@@ -20,10 +20,10 @@ User/audio/text
 
 Model output (untrusted)
   -X-> direct filesystem/process/shell/UI/network access
-  -> future typed tool proposal -> authorization -> approval -> adapter -> audit
+  -> typed proposal -> validation/normalization -> authorization -> bounded adapter -> audit
 ```
 
-The 0.1.1 model request has no tool definitions and the model adapter references no OS action service. Wake inference receives only transient microphone frames and has no LLM, network, filesystem, or tool reference. Voice inference cannot bypass the future authorization kernel.
+The 0.2 planner receives only reviewed tool descriptions and closed JSON schemas. It references no dispatcher, authorization/audit service, or OS adapter. Core's agent loop translates a proposal into the single dispatcher path. Wake inference receives only transient microphone frames and has no LLM, network, filesystem, or tool reference. Voice and text input use the same agent boundary.
 
 ## Offline/network policy
 
@@ -69,16 +69,25 @@ Error messages shown to users are stable/actionable but do not expose stack trac
 - bounded native startup/health polling and linked cancellation;
 - tunable context, GPU layers, threads, audio buffers, VAD limits, and TTS speed;
 - one keyword-spotter inference thread, configurable score/threshold, cooldown suppression, and a bounded continuation timer.
+- one-to-eight configured tool steps per user request, identical-call suppression, one structured-output repair attempt, per-tool deadlines, bounded traversal/output, and a central result cap.
 
 Native model loading can still consume substantial memory and time. GPU OOM is reported with guidance to lower GPU layers/use CPU; it never justifies a wider network bind or a disabled safety check.
 
-## Future tool authorization invariant
+## Tool authorization invariant
 
-When computer-control tools arrive, every side effect must enter one non-bypassable typed dispatcher. Policy considers tool identity, normalized target, arguments, sensitivity, user/session context, and requested scope. Outcomes are allow, deny, or explicit approval. Execution occurs only after allow/approval, and every attempt/result is audited with content minimization. Models never receive direct shell, filesystem, process, Windows UI, database, or hardware handles.
+Every OS observation or side effect enters one non-bypassable typed dispatcher. The trusted registry—not the model—selects the request type, schema, authorization category, executor, deadline, and result cap. Unknown or malformed calls stop before authorization; unsafe normalized values and duplicates stop before authorization; execution starts only after an `Allowed` decision.
+
+The initial policy allows bounded `SAFE_READ` and optionally `SAFE_LOCAL_ACTION`. `Tools:Enabled=false` denies the catalog and `Tools:AllowSafeLocalActions=false` denies visible local actions. `CONFIRM_REQUIRED` and `STRONG_CONFIRM_REQUIRED` fail closed because 0.2 has no interactive grant surface. `DENIED` never runs. JARVIS neither requests elevation nor implements writes, deletion, termination, credential access, generic shell, network tools, or UI automation.
+
+Filesystem tools require canonical targets below explicit existing approved roots, reject existing reparse points and credential-sensitive paths, bound enumeration/file reads, and reject executable/script/link types for document opening. Tracked configuration approves no root. The safe-command contract is a fixed diagnostic enum; executors never concatenate model strings, start PowerShell/`cmd.exe`, inherit the full environment, or accept a model-selected executable/argument.
+
+Every dispatcher terminal path writes an audit event with IDs, tool, decision, timestamps, status, success, sanitized error class, and cancellation/timeout/truncation flags. It deliberately omits arguments, paths, file/process/command content, prompts, responses, and raw exceptions. Structured logs are not yet a durable tamper-resistant audit store.
+
+Tool results are untrusted. Files, repositories, terminal output, websites, documents, and process names can contain prompt injection. Core labels observations as untrusted data and injects a policy that content cannot override JARVIS policy, authorize an action, or invoke a tool. Each subsequent proposal still traverses the full dispatcher. A local model is never trusted merely because it is local.
 
 ## Verification
 
-Automated architecture tests reject outer/model/native/network dependencies from Core. Configuration/path/loopback tests reject unsafe values. Supervisor tests cover lifecycle, fallback, cancellation, and missing assets without real processes. Orchestration tests cover barge-in and stale output. Repository gates scan for secrets, external endpoint remnants, tracked model/runtime artifacts, and warnings.
+Automated architecture tests reject outer/model/native/network dependencies from Core and reject tool dispatcher/authorization/audit references from model adapters. Tool tests cover closed schemas, unknown/malformed proposals, validation/authorization order, denial, approved-root/credential/reparse defenses, fixed command mappings, duplicate calls, cancellation, timeout, truncation, audit completeness, prompt-injection labeling, and temporary-directory behavior. Configuration/path/loopback tests reject unsafe values. Supervisor and voice tests cover lifecycle, fallback, cancellation, barge-in, and stale output. Repository gates scan for secrets, external endpoint remnants, tracked model/runtime artifacts, and warnings.
 
 Physical device release, GPU behavior, local process termination, offline operation, and privacy log inspection are explicitly manual in [the smoke test](../testing/manual-voice-smoke-test.md).
 
@@ -89,4 +98,5 @@ Physical device release, GPU behavior, local process termination, offline operat
 - audit persistence encryption and user deletion controls;
 - Windows sandboxing/job-object hardening for native inference;
 - external local-server authentication configuration;
-- concrete authorization/approval UI for OS tools.
+- concrete authorization/approval UI for confirmation-class OS tools;
+- durable tamper-resistant audit persistence, retention, encryption, and user review.

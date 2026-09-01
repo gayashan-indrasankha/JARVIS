@@ -1,5 +1,7 @@
+using Jarvis.Core.Tools;
 using Jarvis.Core.Voice;
 using Jarvis.Infrastructure.Configuration;
+using Jarvis.Infrastructure.Tools;
 using Jarvis.Infrastructure.Voice;
 using Jarvis.Infrastructure.Voice.Local;
 using Jarvis.Infrastructure.Voice.Local.Llama;
@@ -100,6 +102,21 @@ public static class ServiceCollectionExtensions
                 "LocalAi resource or timeout settings are invalid.")
             .ValidateOnStart();
 
+        services
+            .AddOptions<ToolOptions>()
+            .Bind(configuration.GetSection(ToolOptions.SectionName))
+            .Validate(
+                options => options.MaximumToolSteps is >= 1 and <= 8 &&
+                    options.MaximumResultCharacters is >= 1_024 and <=
+                        ToolDataLimits.MaximumObservationCharacters &&
+                    options.DefaultTimeoutSeconds is >= 1 and <= 60,
+                "Tool loop and result limits are invalid.")
+            .Validate(
+                options => options.AllowedRoots is not null &&
+                    options.AllowedRoots.All(IsSafeConfiguredRoot),
+                "Every configured tool root must be an absolute, non-root path without control characters.")
+            .ValidateOnStart();
+
         services.AddSingleton(static _ => JarvisDataPaths.Create());
         services.AddSingleton<LocalAssetPaths>();
         services.AddSingleton<ILoopbackHttpClientFactory, LoopbackHttpClientFactory>();
@@ -108,6 +125,43 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILlamaServerSupervisor, LlamaServerSupervisor>();
         services.AddSingleton<IVoiceMetrics, StructuredVoiceMetrics>();
         services.AddSingleton<ILanguageModel, LlamaCppLocalLanguageModel>();
+        services.AddSingleton<IAgentPlanner, LlamaCppAgentPlanner>();
+        services.AddSingleton<ToolPathPolicy>();
+        services.AddSingleton<IWindowsActionLauncher, WindowsActionLauncher>();
+        services.AddSingleton<IBoundedProcessRunner, BoundedProcessRunner>();
+        services.AddSingleton<ISystemMetricsProvider, WindowsSystemMetricsProvider>();
+        services.AddSingleton<IToolExecutor<ListDirectoryRequest, ListDirectoryResponse>, ListDirectoryTool>();
+        services.AddSingleton<IToolExecutor<FindFilesRequest, FindFilesResponse>, FindFilesTool>();
+        services.AddSingleton<
+            IToolExecutor<GetFileMetadataRequest, GetFileMetadataResponse>,
+            GetFileMetadataTool>();
+        services.AddSingleton<IToolExecutor<OpenFileRequest, OpenFileResponse>, OpenFileTool>();
+        services.AddSingleton<IToolExecutor<OpenFolderRequest, OpenFolderResponse>, OpenFolderTool>();
+        services.AddSingleton<IToolExecutor<ReadTextFileRequest, ReadTextFileResponse>, ReadTextFileTool>();
+        services.AddSingleton<
+            IToolExecutor<LaunchApplicationRequest, LaunchApplicationResponse>,
+            LaunchApplicationTool>();
+        services.AddSingleton<IToolExecutor<ListProcessesRequest, ListProcessesResponse>, ListProcessesTool>();
+        services.AddSingleton<
+            IToolExecutor<GetSystemMetricsRequest, GetSystemMetricsResponse>,
+            GetSystemMetricsTool>();
+        services.AddSingleton<IToolExecutor<GetGitStatusRequest, GetGitStatusResponse>, GetGitStatusTool>();
+        services.AddSingleton<
+            IToolExecutor<ExecuteSafeCommandRequest, ExecuteSafeCommandResponse>,
+            ExecuteSafeCommandTool>();
+        services.AddSingleton<ToolRegistry>();
+        services.AddSingleton<IToolCatalog>(static provider =>
+            provider.GetRequiredService<ToolRegistry>());
+        services.AddSingleton<IToolAuthorizationPolicy, DefaultToolAuthorizationPolicy>();
+        services.AddSingleton<IToolAuditSink, StructuredToolAuditSink>();
+        services.AddSingleton<IToolDispatcher, ToolDispatcher>();
+        services.AddSingleton(static provider =>
+        {
+            ToolOptions options = provider.GetRequiredService<
+                Microsoft.Extensions.Options.IOptions<ToolOptions>>().Value;
+            return new ToolAgentConfiguration(options.Enabled, options.MaximumToolSteps);
+        });
+        services.AddSingleton<IAgentRuntime, ToolEnabledAgentRuntime>();
         services.AddSingleton<IVoiceActivityDetector, SherpaOnnxVoiceActivityDetector>();
         services.AddSingleton<ISpeechRecognizer, SherpaOnnxSpeechRecognizer>();
         services.AddSingleton<ISpeechSynthesizer, SherpaOnnxKokoroSpeechSynthesizer>();
@@ -125,4 +179,31 @@ public static class ServiceCollectionExtensions
         value.Length <= maximumLength &&
         value.All(character =>
             char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
+
+    private static bool IsSafeConfiguredRoot(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root) ||
+            root.Length > ToolDataLimits.MaximumPathCharacters ||
+            root.Any(char.IsControl) ||
+            !Path.IsPathFullyQualified(root))
+        {
+            return false;
+        }
+
+        try
+        {
+            string fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+            string? pathRoot = Path.GetPathRoot(fullPath);
+            return pathRoot is not null &&
+                !string.Equals(
+                    fullPath,
+                    Path.TrimEndingDirectorySeparator(pathRoot),
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
 }
