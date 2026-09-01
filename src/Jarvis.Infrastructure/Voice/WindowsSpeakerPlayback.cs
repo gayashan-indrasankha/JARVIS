@@ -14,10 +14,8 @@ internal sealed class WindowsSpeakerPlayback : IAudioPlayback
     private readonly Lock _sync = new();
     private BufferedWaveProvider? _buffer;
     private WaveOut? _speaker;
-    private string? _itemId;
-    private int _contentIndex;
-    private long _bytesQueued;
-    private long _itemStartPosition;
+    private long _generationId;
+    private long _invalidThroughGenerationId;
     private int _disposed;
 
     public WindowsSpeakerPlayback(
@@ -48,6 +46,11 @@ internal sealed class WindowsSpeakerPlayback : IAudioPlayback
 
             lock (_sync)
             {
+                if (chunk.GenerationId <= _invalidThroughGenerationId)
+                {
+                    return;
+                }
+
                 EnsureInitialized();
 
                 if (chunk.Data.Length > _buffer!.BufferLength)
@@ -57,24 +60,14 @@ internal sealed class WindowsSpeakerPlayback : IAudioPlayback
 
                 if (_buffer.BufferedBytes + chunk.Data.Length <= _buffer.BufferLength)
                 {
-                    if (_itemId is not null &&
-                        !string.Equals(_itemId, chunk.ItemId, StringComparison.Ordinal))
+                    if (_generationId != 0 && _generationId != chunk.GenerationId)
                     {
                         TryStopSpeaker();
                         _buffer.ClearBuffer();
-                        _bytesQueued = 0;
                     }
 
-                    if (_itemId is null ||
-                        !string.Equals(_itemId, chunk.ItemId, StringComparison.Ordinal))
-                    {
-                        _itemStartPosition = _speaker!.GetPosition();
-                    }
-
-                    _itemId = chunk.ItemId;
-                    _contentIndex = chunk.ContentIndex;
+                    _generationId = chunk.GenerationId;
                     _buffer.AddSamples(chunk.Data, 0, chunk.Data.Length);
-                    _bytesQueued += chunk.Data.Length;
 
                     if (_speaker!.PlaybackState != PlaybackState.Playing)
                     {
@@ -89,44 +82,22 @@ internal sealed class WindowsSpeakerPlayback : IAudioPlayback
         }
     }
 
-    public ValueTask<PlaybackCursor?> InterruptAsync(CancellationToken cancellationToken)
+    public ValueTask InterruptAsync(
+        long invalidThroughGenerationId,
+        CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(invalidThroughGenerationId);
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_sync)
         {
-            if (_buffer is null || _itemId is null)
-            {
-                return ValueTask.FromResult<PlaybackCursor?>(null);
-            }
-
-            long playedBytes;
-            try
-            {
-                playedBytes = Math.Clamp(
-                    _speaker!.GetPosition() - _itemStartPosition,
-                    0,
-                    _bytesQueued);
-            }
-            catch (MmException exception)
-            {
-                WindowsAudioLog.PlaybackOperationFailed(_logger, exception.GetType().Name);
-                playedBytes = Math.Clamp(
-                    _bytesQueued - _buffer.BufferedBytes,
-                    0,
-                    _bytesQueued);
-            }
-            TimeSpan playedDuration = TimeSpan.FromSeconds(
-                (double)playedBytes / Format.BytesPerSecond);
-            PlaybackCursor cursor = new(_itemId, _contentIndex, playedDuration);
-
+            _invalidThroughGenerationId = Math.Max(
+                _invalidThroughGenerationId,
+                invalidThroughGenerationId);
             TryStopSpeaker();
-            _buffer.ClearBuffer();
-            _itemId = null;
-            _contentIndex = 0;
-            _bytesQueued = 0;
-            _itemStartPosition = 0;
-            return ValueTask.FromResult<PlaybackCursor?>(cursor);
+            _buffer?.ClearBuffer();
+            _generationId = 0;
+            return ValueTask.CompletedTask;
         }
     }
 
@@ -138,10 +109,7 @@ internal sealed class WindowsSpeakerPlayback : IAudioPlayback
         {
             _buffer?.ClearBuffer();
             TryStopSpeaker();
-            _itemId = null;
-            _contentIndex = 0;
-            _bytesQueued = 0;
-            _itemStartPosition = 0;
+            _generationId = 0;
         }
 
         return ValueTask.CompletedTask;

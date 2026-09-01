@@ -24,6 +24,8 @@ public sealed class CoreDependencyTests
                 reference.StartsWith("Microsoft.Extensions", StringComparison.Ordinal) ||
                 reference.StartsWith("NAudio", StringComparison.Ordinal) ||
                 reference.StartsWith("OpenAI", StringComparison.Ordinal) ||
+                reference.StartsWith("SherpaOnnx", StringComparison.Ordinal) ||
+                reference.StartsWith("System.Net.Http", StringComparison.Ordinal) ||
                 reference.StartsWith("Microsoft.Data.Sqlite", StringComparison.Ordinal));
     }
 }

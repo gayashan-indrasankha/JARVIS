@@ -11,12 +11,11 @@ JARVIS is a Windows-first, local-first C#/.NET 10 application. Codex is a develo
 ## Invariants
 
 - Dependencies point inward: `Host -> Infrastructure -> Core`; `Host -> Core` is allowed for composition.
-- `Jarvis.Core` stays independent of UI, AI SDKs, Windows APIs, databases, and infrastructure packages.
-- Models never access the OS directly. All side effects must use typed tools, authorization, and audit logging.
-- Security-sensitive operations default to deny or explicit approval.
-- Retrieve and transmit only the minimum context required.
-- Never commit secrets, personal runtime data, generated indexes, logs, or local databases.
-- Add tests for behavior and boundary changes; do not create empty projects for hypothetical modules.
+- `Jarvis.Core` stays independent of UI, AI/model SDKs, Windows APIs, network clients, databases, and infrastructure packages.
+- Normal runtime is offline-capable. External downloads occur only through explicit setup/update workflows; local inference binds exactly to `127.0.0.1`.
+- Models never access the OS directly. Future side effects use typed tools, authorization, and audit logging.
+- Never commit secrets, model weights, native runtime binaries, personal runtime data, logs, databases, or generated indexes.
+- Add behavior and boundary tests; do not create hypothetical empty projects or silently download runtime assets.
 
 ## Validation
 
@@ -29,13 +28,4 @@ dotnet test Jarvis.sln --no-build
 dotnet format Jarvis.sln --verify-no-changes --no-restore
 ```
 
-Warnings are errors. Keep documentation aligned with architectural changes.
-
-## Authoritative docs
-
-- Product scope: [vision](docs/product/vision.md) and [roadmap](docs/product/roadmap.md)
-- System and module boundaries: [system overview](docs/architecture/system-overview.md)
-- Trust, authorization, secrets, and audit: [security](docs/architecture/security.md)
-- Tool execution contract: [tool system](docs/architecture/tool-system.md)
-- Realtime audio design: [voice](docs/architecture/voice.md)
-- Repository analysis and grounded answers: [project intelligence](docs/architecture/project-intelligence.md)
+Warnings are errors. Keep detailed design in [architecture docs](docs/architecture/system-overview.md), product scope in [the roadmap](docs/product/roadmap.md), and security rules in [security.md](docs/architecture/security.md).

@@ -1,118 +1,79 @@
-# Product roadmap
+# JARVIS roadmap
 
-The roadmap is capability- and evidence-driven, not date-driven. A milestone advances only after its safety, testability, and observability gates pass. Names and ordering may change through architecture decisions as prototypes produce evidence.
+Milestones are capability gates, not calendar promises. Each increment must retain inward dependencies, local-first data handling, authorization boundaries, auditability, and deterministic tests.
 
-## 0.0 — Foundation
+## 0.0 — Foundation (complete)
 
-**Goal:** create a buildable, understandable base without prematurely implementing assistant capabilities.
+- .NET 10 solution with Core, Infrastructure, Host, and tests;
+- Generic Host, dependency injection, configuration, and structured logging;
+- warnings-as-errors, analyzers, central package management, formatting rules;
+- architecture, security, tool-system, voice, and project-intelligence designs.
 
-Included:
+## 0.1 — Local realtime voice foundation (complete in code)
 
-- .NET 10 solution with Core, Infrastructure, Host, and Core test projects;
-- inward dependency direction and an automated Core boundary check;
-- Generic Host composition, dependency injection, validated configuration, and structured logging;
-- nullable reference types, warnings-as-errors, SDK analyzers, central package versions, editor policy, and secret-safe ignores;
-- product, security, tool, voice, and project-intelligence architecture documents.
+- provider-neutral Core ports for language generation, VAD, ASR, TTS, audio, wake detection, metrics, and notifications;
+- supervised pinned llama.cpp `llama-server`, fixed IPv4 loopback, bounded startup, health check, cancellation, clean process-tree termination, one 8192→4096 fallback;
+- Qwen3-4B Q4_K_M non-thinking local conversation;
+- sherpa-onnx Silero VAD, small streaming English Zipformer ASR, and Kokoro English TTS;
+- Windows WinMM microphone and speaker adapters;
+- incremental speech-safe segmentation, ordered bounded TTS, generation IDs, stale-output rejection, and barge-in;
+- text and push-to-talk fallbacks, `/interrupt`, clean shutdown;
+- explicit setup/diagnostic scripts, tracked model manifest, local-only metrics;
+- no cloud provider, API key, external runtime request, telemetry, or startup download.
 
-Explicitly excluded: AI APIs, audio, tools, indexing, UI automation, memory, interviews, background agents, and IoT.
+Exit requires automated gates plus the [manual local voice test](../testing/manual-voice-smoke-test.md) on target hardware. Physical voice/offline claims remain manual until executed.
 
-Exit gate:
+## 0.1.1 — Local activation and realtime polish (current)
 
-- restore, build, and tests pass from a clean checkout;
-- no secrets or generated personal data are tracked;
-- a new developer can explain current dependencies and the intended trust boundaries from the docs.
+- replaceable local open-vocabulary “Jarvis” keyword spotter with pinned sherpa-onnx GigaSpeech model;
+- dormant/activating/listening/conversation lifecycle with cooldown and continuation window;
+- push-to-talk and manual-start fallbacks, capture-state display, and content-free wake/latency metrics;
+- automated state/cancellation/duplicate/timeout tests and a physical wake-word matrix.
 
-## 0.1 — Realtime voice foundation
+Exit requires the automated gates plus the wake-word matrix on target hardware. Keyword accuracy, false-positive rate, speaker feedback, distance limits, and idle CPU/battery use remain explicitly unverified until then.
 
-**Goal:** prove an end-to-end, interruptible Windows voice conversation while preserving provider and platform boundaries.
+## 0.1.x — Further audio hardening
 
-Included:
+- acoustic/threshold profiling, device change behavior, and clearer device selection;
+- benchmark alternative local ASR profiles for accents and noisy rooms;
+- evaluate WASAPI and reliable local echo cancellation without weakening barge-in.
 
-- provider-neutral realtime, audio, wake-word, cancellation, and session-state contracts in Core;
-- OpenAI realtime WebSocket adapter with persistent connection and bounded reconnect;
-- Windows PCM microphone capture and speaker playback;
-- streamed audio, server-VAD barge-in, push-to-talk, and text-console fallback;
-- secret-safe configuration, structured content-free operational logging, and graceful shutdown;
-- deterministic orchestration, protocol, reconnect, and configuration tests plus a real-device smoke plan.
+## 0.2 — Typed tool and authorization kernel
 
-Explicitly excluded: computer-control tools, wake-word inference, project indexing, UI automation, memory, and IoT. The milestone reorder is recorded in [ADR 0001](../decisions/0001-realtime-voice-transport-and-windows-audio.md).
+- strongly typed tool descriptions, requests, results, cancellation, and timeouts;
+- centralized authorization decisions and explicit user approval surface;
+- append-only structured audit events with redaction and correlation IDs;
+- no shell/filesystem/process implementation until bypass-resistance is tested.
 
-## 0.2 — Tool safety vertical slice
+## 0.3 — Controlled Windows capabilities
 
-**Goal:** validate one narrowly scoped, low-risk local tool end to end.
+- scoped filesystem, process/application, system information, and safe shell tools;
+- path canonicalization, command injection defenses, least privilege, and dry-run/preview;
+- Windows-specific code behind platform interfaces; destructive tests use fakes/temp resources.
 
-Candidate scope:
+## 0.4 — Project intelligence
 
-- typed tool catalog, argument validation, policy decisions, approval binding, execution, and audit;
-- a read-only system-information tool with explicit output limits;
-- policy and prompt-injection adversarial tests;
-- local audit persistence and a basic review/export path.
+- repository discovery within user-approved roots;
+- local metadata/text indexes and Roslyn C# symbol/dependency analysis;
+- evidence-ranked context retrieval and grounded file/symbol explanations;
+- technical tutoring and project-specific interview generation/evaluation.
 
-Filesystem mutation and general shell execution remain out of scope until this model is demonstrated.
+## 0.5 — Memory, desktop understanding, and proactive events
 
-## 0.3 — Voice hardening and local activation
+- explicit memory categories, provenance, retention, correction, and deletion;
+- consent-based screen/window understanding and Windows UI automation;
+- bounded background events and notifications with quiet hours and authorization.
 
-**Goal:** harden the 0.1 vertical slice using measured device and latency evidence.
+## Later
 
-Candidate scope:
+- pluggable hardware/IoT adapters behind the same typed-tool policy;
+- optional additional local models selected through manifests and benchmarks;
+- packaging/update strategy with signed artifacts and verified supply chain.
 
-- local audio device abstraction, buffering, and device-change handling;
-- local wake-word and voice-activity components;
-- a selected replaceable local wake-word engine;
-- resampling, modern device discovery/change handling, and echo/acoustic evaluation;
-- latency instrumentation and broader cancellation/race tests;
-- latency, failure, privacy, and reconnect telemetry.
+## Persistent risks
 
-The provider adapter must not gain tool execution authority.
-
-## 0.4 — Controlled Windows capabilities
-
-**Goal:** add useful OS actions one capability at a time.
-
-Candidate scope:
-
-- constrained filesystem read and later write tools with canonical path policy;
-- process and application inspection before control operations;
-- allowlisted command execution without a general-purpose model-owned shell;
-- Windows implementations behind platform interfaces;
-- approval UX, rate limits, timeouts, output limits, and recovery tests.
-
-## 0.5 — Project intelligence
-
-**Goal:** answer questions about opted-in C# repositories with traceable evidence.
-
-Candidate scope:
-
-- repository discovery limited to user-approved roots;
-- local metadata and content index with ignore, size, and sensitivity rules;
-- Roslyn solution, project, syntax, symbol, reference, and dependency analysis;
-- retrieval that returns minimal relevant excerpts and file/symbol citations;
-- freshness detection and grounded explanation evaluation.
-
-Tutoring and interviews follow only after core retrieval quality is measured.
-
-## Later horizons
-
-- technical tutoring, project-specific interviews, answer evaluation, and weakness tracking;
-- screen/window understanding and accessibility-first Windows UI automation;
-- user-owned long-term memory with provenance, retention, export, and deletion;
-- bounded background events and proactive notification controls;
-- optional hardware and IoT adapters with the same authorization and audit model.
-
-## Cross-cutting gates for every milestone
-
-- Core remains provider-, platform-, UI-, and persistence-neutral.
-- New side effects have explicit authorization and complete audit coverage.
-- Sensitive inputs and outputs have redaction, retention, and size policies.
-- Provider failures, cancellation, timeouts, and partial completion are tested.
-- Relevant architecture docs and decisions are updated in the same change.
-- Dependency additions have a clear owner, purpose, license review, and maintenance plan.
-
-## Known risks
-
-- Realtime latency may conflict with local processing and safety checks.
-- Approval prompts can become either unsafe through fatigue or unusable through excess friction.
-- Windows UI automation is brittle across application, DPI, accessibility, and session changes.
-- Repository content and tool output can contain prompt injection or secrets.
-- Long-term memory can create privacy, staleness, and incorrect-inference problems.
-- Provider APIs and local model capabilities will change; boundaries must be tested, not merely documented.
+- 4 GB VRAM constrains context and offload; stability has priority over maximum context.
+- Local model quality, ASR accuracy, and TTS latency vary with hardware and acoustics.
+- Native runtime/model downloads are a supply-chain boundary; missing authoritative hashes must stay visible.
+- Voice barge-in without echo cancellation works best with headphones.
+- Future OS tools expand impact and must never reuse the model/runtime boundary as authorization.

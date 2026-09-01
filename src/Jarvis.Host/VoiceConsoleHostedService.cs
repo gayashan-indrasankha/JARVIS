@@ -8,17 +8,20 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
 {
     private readonly RealtimeVoiceCoordinator _coordinator;
     private readonly VoiceOptions _options;
+    private readonly LocalAiOptions _localAiOptions;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger<VoiceConsoleHostedService> _logger;
 
     public VoiceConsoleHostedService(
         RealtimeVoiceCoordinator coordinator,
         IOptions<VoiceOptions> options,
+        IOptions<LocalAiOptions> localAiOptions,
         IHostApplicationLifetime applicationLifetime,
         ILogger<VoiceConsoleHostedService> logger)
     {
         _coordinator = coordinator;
         _options = options.Value;
+        _localAiOptions = localAiOptions.Value;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
     }
@@ -30,7 +33,11 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
             CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         Task notifications = DisplayNotificationsAsync(notificationCancellation.Token);
 
-        if (_options.Enabled && _options.AutoStart)
+        if (_localAiOptions.Enabled && _options.WakeWord.AlwaysListeningEnabled)
+        {
+            await TryExecuteAsync(ArmWakeWordAsync, stoppingToken).ConfigureAwait(false);
+        }
+        else if (_localAiOptions.Enabled && _options.AutoStart)
         {
             await TryExecuteAsync(StartSessionAsync, stoppingToken).ConfigureAwait(false);
         }
@@ -75,7 +82,8 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
         switch (input.ToUpperInvariant())
         {
             case "/START":
-                await TryExecuteAsync(StartSessionAsync, cancellationToken).ConfigureAwait(false);
+                await TryExecuteAsync(StartDiagnosticSessionAsync, cancellationToken)
+                    .ConfigureAwait(false);
                 break;
             case "/STOP":
                 await TryExecuteAsync(
@@ -83,9 +91,7 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
                     cancellationToken).ConfigureAwait(false);
                 break;
             case "/PTT":
-                await TryExecuteAsync(
-                    token => _coordinator.BeginPushToTalkAsync(token),
-                    cancellationToken).ConfigureAwait(false);
+                await TryExecuteAsync(BeginPushToTalkAsync, cancellationToken).ConfigureAwait(false);
                 break;
             case "/SEND":
                 await TryExecuteAsync(
@@ -96,6 +102,10 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
                 await TryExecuteAsync(
                     token => _coordinator.InterruptAsync(token),
                     cancellationToken).ConfigureAwait(false);
+                break;
+            case "/FALSEWAKE":
+                await TryExecuteAsync(ReportFalseWakeAsync, cancellationToken)
+                    .ConfigureAwait(false);
                 break;
             case "/HELP":
                 WriteHelp();
@@ -111,18 +121,84 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
         }
     }
 
-    private Task StartSessionAsync(CancellationToken cancellationToken)
+    private Task StartSessionAsync(CancellationToken cancellationToken) =>
+        _coordinator.StartAsync(CreateConfiguration(), cancellationToken);
+
+    private async Task StartDiagnosticSessionAsync(CancellationToken cancellationToken)
     {
-        if (!_options.Enabled)
+        EnsureLocalAiEnabled();
+        if (_coordinator.State != VoiceSessionState.Stopped)
         {
-            throw new InvalidOperationException(
-                "Voice is disabled. Configure Voice:Enabled and a credential first.");
+            await _coordinator.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        RealtimeSessionConfiguration configuration = new(
-            _options.ActivationMode,
-            _options.Instructions);
-        return _coordinator.StartAsync(configuration, cancellationToken);
+        await StartSessionAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private Task ArmWakeWordAsync(CancellationToken cancellationToken)
+    {
+        EnsureLocalAiEnabled();
+        return _coordinator.ArmWakeWordAsync(CreateConfiguration(), cancellationToken);
+    }
+
+    private async Task BeginPushToTalkAsync(CancellationToken cancellationToken)
+    {
+        EnsureLocalAiEnabled();
+        if (_coordinator.State is VoiceSessionState.Stopped or VoiceSessionState.Sleeping)
+        {
+            if (_coordinator.State == VoiceSessionState.Sleeping)
+            {
+                await _coordinator.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await _coordinator.StartAsync(
+                CreateConfiguration(VoiceActivationMode.PushToTalk),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        await _coordinator.BeginPushToTalkAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ReportFalseWakeAsync(CancellationToken cancellationToken)
+    {
+        _coordinator.RecordFalseActivation();
+        if (!_options.WakeWord.AlwaysListeningEnabled)
+        {
+            return;
+        }
+
+        await _coordinator.StopAsync(cancellationToken).ConfigureAwait(false);
+        await ArmWakeWordAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private VoiceSessionConfiguration CreateConfiguration(
+        VoiceActivationMode? activationMode = null) =>
+        new(
+            activationMode ?? _options.ActivationMode,
+            _options.Persona,
+            speechInputEnabled: _options.Enabled,
+            speechOutputEnabled: _options.SpeechOutputEnabled,
+            maximumOutputTokens: _localAiOptions.MaximumOutputTokens,
+            responseSegmentation: new ResponseSegmentationConfiguration(
+                _options.ResponseSegmentation.MinimumSentenceCharacters,
+                _options.ResponseSegmentation.MinimumClauseCharacters,
+                _options.ResponseSegmentation.MaximumSegmentCharacters),
+            wakeWord: new WakeWordSessionConfiguration(
+                _options.WakeWord.AlwaysListeningEnabled,
+                _options.WakeWord.Phrase,
+                _options.WakeWord.KeywordScore,
+                _options.WakeWord.KeywordThreshold,
+                TimeSpan.FromSeconds(_options.WakeWord.CooldownSeconds),
+                TimeSpan.FromSeconds(_options.WakeWord.ContinuationWindowSeconds),
+                _options.WakeWord.Acknowledgement));
+
+    private void EnsureLocalAiEnabled()
+    {
+        if (!_localAiOptions.Enabled)
+        {
+            throw new InvalidOperationException(
+                "Local AI is disabled. Set LocalAi:Enabled to true first.");
+        }
     }
 
     private async Task TryExecuteAsync(
@@ -136,12 +212,14 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
-        catch (Exception exception) when (
-            exception is InvalidOperationException or TimeoutException or IOException)
+        catch (Exception exception)
         {
             HostLog.VoiceCommandFailed(_logger, exception.GetType().Name);
-            Console.WriteLine(
-                $"JARVIS command failed ({exception.GetType().Name}). See the structured log for the failure class.");
+            string message = exception is LocalComponentUnavailableException
+                ? exception.Message
+                : $"JARVIS command failed ({exception.GetType().Name}). " +
+                    "See the structured log for the failure class.";
+            Console.WriteLine(message);
         }
     }
 
@@ -153,10 +231,28 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
             switch (notification)
             {
                 case VoiceSessionStateChangedNotification state:
+                    if (state.State == VoiceSessionState.Listening)
+                    {
+                        Console.WriteLine();
+                    }
+
                     Console.WriteLine($"[voice: {state.State}]");
+                    break;
+                case VoiceCaptureStateChangedNotification capture:
+                    Console.WriteLine($"[capture: {capture.State}]");
+                    break;
+                case WakeWordDetectedNotification wake:
+                    Console.WriteLine($"[wake word: {SanitizeForConsole(wake.Phrase)}]");
                     break;
                 case AssistantTranscriptNotification transcript:
                     Console.Write(SanitizeForConsole(transcript.Text));
+                    Console.Write(' ');
+                    break;
+                case UserTranscriptNotification transcript:
+                    Console.WriteLine(
+                        transcript.IsFinal
+                            ? $"[heard: {SanitizeForConsole(transcript.Text)}]"
+                            : $"[hearing: {SanitizeForConsole(transcript.Text)}]");
                     break;
                 case VoiceSessionErrorNotification error:
                     Console.WriteLine(
@@ -168,18 +264,23 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
 
     private void WriteHelp()
     {
-        Console.WriteLine("JARVIS 0.1 realtime voice console");
-        Console.WriteLine("/start  start a configured voice session");
+        Console.WriteLine("JARVIS local 0.1.1 voice console");
+        Console.WriteLine("/start  start a session manually (diagnostics)");
         Console.WriteLine("/stop   stop the active session");
         Console.WriteLine("/ptt    begin push-to-talk capture (push-to-talk mode)");
         Console.WriteLine("/send   stop capture and submit the push-to-talk turn");
         Console.WriteLine("/interrupt  stop the current assistant response");
+        Console.WriteLine("/falsewake  record a false activation and return to sleep");
         Console.WriteLine("/quit   stop JARVIS cleanly");
         Console.WriteLine("Any other line is sent as text for debugging; /help repeats this list.");
 
-        if (!_options.Enabled)
+        if (!_localAiOptions.Enabled)
         {
-            Console.WriteLine("Voice is disabled; see README.md for secret-safe setup.");
+            Console.WriteLine("Local AI is disabled; see README.md for offline setup.");
+        }
+        else if (!_options.Enabled)
+        {
+            Console.WriteLine("Microphone input is disabled; text debugging remains available.");
         }
     }
 

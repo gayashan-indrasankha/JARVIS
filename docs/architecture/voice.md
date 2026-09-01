@@ -1,128 +1,120 @@
-# Voice architecture
+# Local voice architecture
 
-## Scope
+Version 0.1.1 is a fully local, interruptible Windows voice vertical slice with dormant keyword activation. Core owns orchestration and provider-neutral contracts; Infrastructure owns llama.cpp, sherpa-onnx, NAudio, native lifetime, and local HTTP details. The wake-word port remains replaceable.
 
-JARVIS supports its first realtime, interruptible voice conversation on Windows in version 0.1. The vertical slice contains provider-neutral Core orchestration, an OpenAI realtime WebSocket adapter, WinMM microphone/speaker adapters, server semantic VAD, push-to-talk, and console text input. It defines a wake-word port but intentionally contains no wake-word engine.
-
-The design separates local audio/platform work, conversation semantics, and remote provider protocols so that device libraries and AI providers can be replaced independently.
-
-## Experience goals
-
-- Wake locally without continuously streaming room audio to a provider.
-- Begin responding with low perceived latency.
-- Allow natural barge-in: detected user speech stops playback and cancels or redirects the active response.
-- Recover predictably from device changes, network loss, provider errors, and false wakes.
-- Make capture, streaming, and retention state visible and controllable.
-- Keep tool authorization separate from conversational fluency.
-
-## 0.1 pipeline
+## Pipeline
 
 ```text
-Windows capture adapter
-  -> PCM16 mono 24 kHz frames in a bounded buffer
-  -> voice-session coordinator
-  -> provider-neutral realtime-session port
-  -> OpenAI WebSocket adapter and bounded outbound queues
-
-Provider audio/events
-  -> size-bounded protocol parser
-  -> voice-session coordinator
-  -> bounded PCM playback buffer
-  -> Windows playback adapter
+Windows microphone (16 kHz PCM16 mono)
+  -> while Sleeping: sherpa-onnx Zipformer KWS (one CPU thread)
+  -> accepted "Jarvis" wake; release dormant capture
+  -> initialize/warm conversation components
+  -> bounded capture stream
+  -> Silero VAD (CPU, active even while JARVIS speaks)
+  -> streaming Zipformer ASR (CPU; partial and final text)
+  -> ILanguageModel
+  -> llama.cpp loopback streaming generation (Qwen3 /no_think)
+  -> incremental response segmenter
+  -> Kokoro TTS (CPU, ordered bounded queue, 24 kHz PCM16 mono)
+  -> Windows speaker
 ```
 
-OpenAI semantic VAD produces speech-start/speech-stop control events in the default mode. Push-to-talk disables server turn detection and commits the audio buffer explicitly. Control events travel separately from raw audio frames. Bounded channels provide backpressure; microphone/audio frames may be dropped under pressure rather than creating unbounded latency. Stale queued frames and turns are discarded on reconnect and never replayed automatically.
+Text input bypasses capture/VAD/ASR but uses the same language model, segmenter, and—unless disabled—TTS. Push-to-talk starts capture only after `/ptt`, finalizes ASR at `/send`, and otherwise follows the same pipeline. `/start` bypasses wake detection for diagnostics. When push-to-talk is used while sleeping, Host starts a push-to-talk conversation without requiring the phrase.
 
-## Ownership boundaries
+## Wake and continuation lifecycle
 
-### Core
+```text
+Stopped -> Sleeping -> Activating -> Listening <-> Conversation
+                 ^                         |
+                 +---- idle timeout -------+
+```
 
-Core owns provider-neutral session events, turn state, interruption/cancellation semantics, data limits, and ports for realtime conversation, capture, playback, and wake detection. `RealtimeVoiceCoordinator` is tested with synthetic events and fake ports and has no audio SDK, provider SDK, logging package, Windows API, or network dependency.
+`Sleeping` runs only microphone capture and the keyword spotter. A hit releases the microphone before Core enters `Activating`, preventing two capture owners. Core then initializes the LLM and required VAD/ASR/TTS components, enters `Listening`, starts conversation capture for VAD mode, and optionally speaks a fixed local acknowledgement. The acknowledgement uses TTS directly and never asks the LLM.
 
-### Infrastructure
+The continuation timer starts after activation and refreshes on speech, push-to-talk, text submission, interruption, and completed turns. It expires only while no speech, push-to-talk capture, or generation is active. Expiry stops conversation capture/playback, clears bounded history, transitions to `Sleeping`, and rearms keyword capture. Conversation engines may remain initialized until shutdown so a later wake is warm; initial sleep never initializes them.
 
-Infrastructure owns the OpenAI JSON/WebSocket protocol, authentication, reconnect policy, Windows audio devices, buffers, and structured operational logs. NAudio and WebSocket types do not cross into Core. The disabled wake detector implements the Core wake port until a local engine is selected. Resampling and local wake/VAD engines remain future work.
+Cooldown suppresses a new detection that arrives too soon after the last accepted wake. Suppressed duplicates increment only a numeric false-activation counter. `/falsewake` lets a tester label a false activation and rearm sleep without logging audio or recognized content.
 
-### Host/UI
+## Core contracts and ownership
 
-Host composes the adapters and exposes a console debugging surface with `/start`, `/stop`, `/ptt`, `/send`, `/interrupt`, `/quit`, and plain-text turns. The console displays state and assistant transcript deltas but contains no conversation rules. A future UI technology must not become a Core dependency.
+`ILanguageModel`, `IVoiceActivityDetector`, `ISpeechRecognizer`, `ISpeechSynthesizer`, `IAudioCapture`, `IAudioPlayback`, `IWakeWordDetector`, and `IVoiceMetrics` expose bounded domain records and cancellation tokens. They contain no native handles, HTTP messages, llama.cpp request objects, sherpa-onnx types, NAudio types, or logging framework types.
 
-## Session state
+`RealtimeVoiceCoordinator` owns:
 
-The 0.1 coordinator exposes:
+- session states (`Stopped`, `Sleeping`, `Activating`, `Listening`, `AwaitingResponse`, `Speaking`, `Interrupted`, `Faulted`);
+- bounded in-memory conversation history and response size limits;
+- a ten-frame microphone pre-roll for retaining speech onset;
+- VAD-to-ASR turn finalization and partial/final transcript notifications;
+- language generation and a single ordered synthesis consumer;
+- generation IDs, linked cancellation, stale-output rejection, and playback interruption;
+- structured content-free timing metrics.
 
-- **Activating** — session and devices are being prepared.
-- **Listening** — user audio is captured for the active session.
-- **Awaiting response** — a committed user turn is being processed.
-- **Speaking** — assistant audio is playing while input still monitors for barge-in according to policy.
-- **Interrupted** — playback is stopped and the active provider response is cancelled/drained.
-- **Recovering** — transient device or provider reconnection is bounded by deadline/retry policy.
-- **Stopped** — capture, playback, provider stream, and buffers are closed.
-- **Faulted** — a non-transient provider/audio boundary failed; the process remains alive so the user can stop and restart.
+The coordinator initializes only required components. Initial dormant mode does not load the LLM, VAD, ASR, or TTS. Text-only mode does not load speech models or open devices; speech output can be independently disabled.
 
-`Stopped` is also the dormant 0.1 state because wake inference is disabled. Audio callbacks only copy into a bounded channel; they never mutate conversation state or execute tools.
+## Local language inference
 
-## Wake word and activation
+`LlamaCppLocalLanguageModel` implements Core's language port. The adapter requests a persistent supervised connection and streams server-sent completion deltas from fixed loopback HTTP. It adds Qwen's `/no_think` control to the user turn, accepts only visible `content`, ignores `reasoning_content`, bounds each event and aggregate visible output, and never registers OS tools.
 
-- `IWakeWordDetector` is the replaceable Core-owned boundary; the 0.1 implementation reports unavailable and opens no dormant microphone.
-- A future wake-word engine must run locally by default.
-- Dormant audio is held only in a short in-memory rolling buffer required by detection and is not persisted.
-- Activation has debounce/cooldown rules and a visible/audible indicator.
-- The user starts an active session explicitly and can select push-to-talk as a fallback.
-- False accept/reject rates, CPU use, supported sample formats, model provenance, and licensing are evaluated before choosing an implementation.
-- Wake detection grants permission to begin a conversation, not to execute a tool.
+Managed `LlamaServerSupervisor`:
 
-## Barge-in and cancellation
+1. validates the logical model and required runtime/model files under `JARVIS_HOME`;
+2. generates a random ephemeral per-process credential;
+3. starts `llama-server.exe` without a shell or visible window and with a minimal allowlisted child environment rather than inherited credentials;
+4. passes model, fixed `127.0.0.1` bind, port, context, GPU layers, threads, offline mode, disabled reasoning/agent/tools/UI/MCP proxy/slots, restrictive CORS, and one parallel slot as separate argument-list values;
+5. drains stdout/stderr but records only classified diagnostic codes;
+6. polls `/health` within a bounded timeout;
+7. retries at 4096 context once if the configured 8192 startup fails, with no restart loop;
+8. detects unexpected exit and kills the entire process tree on cancellation/disposal, with bounded exit and diagnostic-drain waits.
 
-When user speech is confidently detected during playback:
+External mode skips launch and requires an already healthy server at exactly `http://127.0.0.1:<port>/`. Remote or wildcard hosts are invalid. External-server authentication is not configured in 0.1; its operator is responsible for the explicitly started local process.
 
-1. Playback stops immediately or fades over a very short bounded interval.
-2. Buffered assistant audio is discarded.
-3. With server VAD, OpenAI cancels the current response and JARVIS sends `conversation.item.truncate` at the locally measured audible position. Explicit and push-to-talk interruption sends `response.cancel` as well.
-4. The new user audio becomes a new or amended turn according to provider capabilities.
-5. Late provider audio/events from the cancelled generation are ignored using generation identifiers.
-6. Tool execution is not automatically cancelled if a side effect has started; each tool reports its cancellation and partial-effect semantics.
+## Local speech implementations
 
-Metrics should measure speech-detection-to-playback-stop latency. Echo cancellation, microphone/speaker coupling, false speech starts, and headphones/no-headphones behavior require device testing.
+`SherpaOnnxKeywordSpotter` uses the pinned 3.3M-parameter English Zipformer GigaSpeech keyword model with int8 encoder/decoder/joiner, BPE tokens `▁JA R VI S @JARVIS`, CPU provider, and one inference thread. The score, threshold, cooldown, continuation window, and enable flag are validated configuration. Each PCM frame is converted and decoded transiently; no dormant audio is written. Default score `1.5`, threshold `0.25`, cooldown `3 s`, and continuation `30 s` are provisional physical-test values, not accuracy claims.
 
-## Provider abstraction
+`SherpaOnnxVoiceActivityDetector` uses the pinned Silero model with 512-sample windows at 16 kHz. Threshold, minimum speech/silence, and maximum speech duration are configured and validated. It buffers at most one partial native window plus the coordinator's bounded pre-roll.
 
-Core expresses capabilities rather than OpenAI event names: open/end session, append/commit input audio, submit text, receive transcripts/audio/response events, cancel a generation, and truncate conversation at the audible playback cursor.
+`SherpaOnnxSpeechRecognizer` uses the small int8 streaming English Zipformer transducer. Audio is decoded incrementally; changed partial text can be displayed and final text is produced/reset at speech end. Transcripts are in memory only.
 
-The OpenAI adapter owns authentication, JSON translation, event ordering, connection handshakes, and bounded retry. A disconnect creates a fresh session; 0.1 does not claim protocol resumption or conversation replay. The provider has no local tool registration/execution surface, and provider session instructions never become local policy.
+`SherpaOnnxKokoroSpeechSynthesizer` uses the English Kokoro ONNX package, built-in `bm_george` speaker ID 9, configurable speed, CPU provider, and native progress callback. Callback audio is copied into bounded 64 KiB-or-smaller chunks and a channel capacity of eight. Segments are never synthesized concurrently, so playback order cannot change. Cancellation stops the callback cooperatively; native objects and generated buffers are disposed.
 
-## Audio format and buffering
+NAudio WinMM adapters retain default/configured numeric input/output devices. Capture and playback validate the exact Core formats. Playback has a bounded buffer and interruption resets the output hardware buffer before accepting a newer generation.
 
-The 0.1 Core session format is PCM16 mono at 24 kHz. WinMM is asked to capture this format directly; there is no resampler. Microphone callbacks copy owned frames into a bounded channel, provider messages are capped at 1 MiB, individual audio chunks are capped at 256 KiB, and playback buffering is capped at five seconds by default. Raw audio is never written to logs or disk.
+## Segmentation and output safety
 
-Format negotiation/resampling, buffer pooling, WASAPI evaluation, and device-change handling remain open hardening work. The provider maps the Core audio value into wire JSON so no OpenAI type appears in Core.
+The segmenter consumes generation deltas and emits short speech units at sentence boundaries, then clause/maximum-size boundaries. It delays a small suffix so hidden-reasoning/code markers split across deltas cannot leak. Before user display/TTS it removes code fences and contents, `<think>`/`<analysis>` contents, inline formatting/control characters, and tool/function metadata-shaped segments. The adapter also discards model `reasoning_content`; defense therefore exists at both protocol and presentation boundaries.
 
-## Privacy and security
+No sanitizer is a general trust boundary. Model output remains untrusted and 0.1 has no tool execution path.
 
-- The console reports active session state; a persistent graphical capture indicator is not yet implemented.
-- Muting closes or discards capture at the local adapter, not merely at the provider.
-- Audio leaves the device only during an explicitly active remote session and according to configured provider policy.
-- Recordings and diagnostic samples are off. Assistant transcripts appear in the interactive debug console but are not structured-log fields or persisted by JARVIS.
-- Audio/transcripts passed to providers are minimized and have retention disclosure.
-- Device names, transcripts, wake detections, and provider events are treated as potentially sensitive.
-- Remote content and transcripts are untrusted input and cannot authorize tools.
+## Barge-in and cancellation invariant
 
-## Reliability and observability
+Capture and VAD remain active while output plays. At speech start:
 
-Measure without recording content:
+1. Core increments the generation ID before new work;
+2. the old linked generation token is cancelled, stopping LLM streaming and pending/current TTS;
+3. playback is interrupted and buffered hardware audio is cleared;
+4. ASR resets and receives bounded pre-roll plus the new utterance;
+5. late tokens/audio must match the current generation ID or are rejected;
+6. finalized new speech creates the next generation.
 
-- activation and first-audio latency;
-- capture gaps, buffer depth, dropped frames, and playback underruns;
-- speech-start to playback-stop latency;
-- provider connection/reconnect duration and failure classes;
-- turn duration, cancellations, false wakes, and session resource use;
-- selected format and device-change events with sensitive names hashed/redacted where appropriate.
+`/interrupt` performs the same invalidation/cancellation/clear sequence without creating a user turn. A cancelled generation is never added as completed assistant history. `/stop`, `/quit`, EOF, and Ctrl+C cancel active pumps and generation, stop playback, dispose native engines/devices, and terminate the managed child.
 
-Reconnect uses a bounded exponential delay and stops after eight failures by default. It reports only fixed reason codes and never replays stale audio/control messages. Provider item identifiers suppress late audio after interruption. Full session/generation correlation telemetry and device-loss recovery remain future hardening work.
+## Resource and latency policy
 
-## 0.1 validation
+The target profile is 16 GB RAM and RTX 4050 Laptop GPU with 4 GB VRAM. Defaults use one Qwen3-4B Q4_K_M model, context 8192, tunable 24-layer GPU offload, eight llama threads, one parallel request, CPU speech engines, bounded queues, and bounded history. The supervisor may fall back once to context 4096; it never attempts 32K automatically. Users can lower GPU layers or select the CPU runtime when memory/driver constraints demand it.
 
-- Automated tests cover provider-independent streaming, server-VAD and explicit interruption, push-to-talk, clean shutdown, protocol translation, malformed events, sanitized errors, credential-free payloads, endpoint validation, initial connection failure, and post-connect remote closure/reconnect.
-- Automated tests require no API key, network, microphone, or speaker.
-- Real provider access, device compatibility, audio quality/latency, acoustic echo, barge-in responsiveness, network toggling, and device release require the [manual voice smoke test](../testing/manual-voice-smoke-test.md).
-- Device changes, sleep/resume, Bluetooth transitions, echo cancellation, and local wake-word quality are not release claims for 0.1.
+Metrics are keyword-frame detection latency, cumulative false activations, wake-to-listening latency, model readiness/load time, prompt processing time when reported, first-token/warm-first-token latency, server-reported tokens/second, ASR finalization, TTS first audio, barge-in playback stop, and end-to-end turn time. Values contain no transcript/audio content. “Warm first token” measures a generation request after the managed model endpoint is ready; it does not include cold model startup.
+
+## Failure behavior and validation
+
+Missing assets produce stable actionable component codes and instruct setup rather than crashing host startup. Model-load, GPU-OOM, and port-in-use failures retain distinct sanitized codes; model/port failures do not trigger a pointless context retry. Unhealthy server, capture/native, and invalid stream failures transition the active session to a controlled error or return a safe console message. There is no unbounded retry/replay.
+
+Unit tests use fake ports/processes/HTTP handlers; they verify wake state, lazy initialization, cooldown, continuation, timeout, cancellation, push-to-talk coexistence, ordering, fallback, sanitization, and stale rejection without devices/models/network. Hardware, GPU, acoustic, latency, and disconnected-operation claims require the [voice smoke test](../testing/manual-voice-smoke-test.md) and [wake-word matrix](../testing/manual-wake-word-test-matrix.md).
+
+## Deferred work
+
+- echo cancellation, hot-plug/device switching, resampling, and WASAPI evaluation;
+- physical wake threshold/distance/noise profiling and idle battery measurement;
+- accent/noise benchmarks and alternate local ASR profiles;
+- packaging/signed update workflow and an authoritative hash for every upstream archive;
+- tools, project indexing, memory, UI automation, and persistence.

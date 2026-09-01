@@ -6,6 +6,10 @@
 coverage/
 *.coverage
 *.coveragexml
+*.dmp
+*.mdmp
+*.etl
+*.trace
 
 # Visual Studio, VS Code, and JetBrains
 .vs/
@@ -38,6 +42,21 @@ secrets.json
 # Runtime state, local databases, logs, and indexes
 data/
 logs/
+recordings/
+*.log
+/Models/
+/Runtime/
+*.gguf
+*.safetensors
+*.onnx
+*.bin
+*.tar.bz2
+llama-*.exe
+llama-*.dll
+ggml*.dll
+cublas*.dll
+cudart*.dll
+installed-components.json
 *.db
 *.db-shm
 *.db-wal

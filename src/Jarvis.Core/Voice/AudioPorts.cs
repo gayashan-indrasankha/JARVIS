@@ -11,7 +11,7 @@ public interface IAudioCapture : IAsyncDisposable
 }
 
 /// <summary>
-/// Plays assistant audio and reports how much was audible when interrupted.
+/// Plays generation-tagged assistant audio and can discard buffered output immediately.
 /// </summary>
 public interface IAudioPlayback : IAsyncDisposable
 {
@@ -19,66 +19,32 @@ public interface IAudioPlayback : IAsyncDisposable
 
     public ValueTask EnqueueAsync(AssistantAudioChunk chunk, CancellationToken cancellationToken);
 
-    public ValueTask<PlaybackCursor?> InterruptAsync(CancellationToken cancellationToken);
+    public ValueTask InterruptAsync(
+        long invalidThroughGenerationId,
+        CancellationToken cancellationToken);
 
     public ValueTask StopAsync(CancellationToken cancellationToken);
 }
 
 public sealed record AssistantAudioChunk
 {
-    public AssistantAudioChunk(byte[] data, string itemId, int contentIndex)
+    public AssistantAudioChunk(byte[] data, long generationId)
     {
         ArgumentNullException.ThrowIfNull(data);
-        ArgumentException.ThrowIfNullOrWhiteSpace(itemId);
-        ArgumentOutOfRangeException.ThrowIfNegative(contentIndex);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(generationId);
 
         if (data.Length == 0 || data.Length > VoiceDataLimits.MaximumAudioChunkBytes)
         {
             throw new ArgumentException("Assistant audio has an invalid size.", nameof(data));
         }
 
-        if (itemId.Length > VoiceDataLimits.MaximumItemIdCharacters ||
-            itemId.Any(char.IsControl))
-        {
-            throw new ArgumentException("The provider item identifier is invalid.", nameof(itemId));
-        }
-
         Data = data;
-        ItemId = itemId;
-        ContentIndex = contentIndex;
+        GenerationId = generationId;
     }
 
     public byte[] Data { get; }
 
-    public string ItemId { get; }
-
-    public int ContentIndex { get; }
-}
-
-public sealed record PlaybackCursor
-{
-    public PlaybackCursor(string itemId, int contentIndex, TimeSpan playedDuration)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(itemId);
-        ArgumentOutOfRangeException.ThrowIfNegative(contentIndex);
-        ArgumentOutOfRangeException.ThrowIfLessThan(playedDuration, TimeSpan.Zero);
-
-        if (itemId.Length > VoiceDataLimits.MaximumItemIdCharacters ||
-            itemId.Any(char.IsControl))
-        {
-            throw new ArgumentException("The provider item identifier is invalid.", nameof(itemId));
-        }
-
-        ItemId = itemId;
-        ContentIndex = contentIndex;
-        PlayedDuration = playedDuration;
-    }
-
-    public string ItemId { get; }
-
-    public int ContentIndex { get; }
-
-    public TimeSpan PlayedDuration { get; }
+    public long GenerationId { get; }
 }
 
 public static class VoiceDataLimits
@@ -87,7 +53,9 @@ public static class VoiceDataLimits
 
     public const int MaximumTextCharacters = 32 * 1024;
 
-    public const int MaximumItemIdCharacters = 256;
-
     public const int MaximumInstructionsCharacters = 16 * 1024;
+
+    public const int MaximumConversationMessages = 16;
+
+    public const int MaximumSpeechSegmentCharacters = 320;
 }

@@ -5,6 +5,8 @@ namespace Jarvis.Core.Voice;
 /// </summary>
 public sealed record AudioFormat
 {
+    public static AudioFormat Pcm16Mono16Khz { get; } = new(16_000, 1, 16);
+
     public static AudioFormat Pcm16Mono24Khz { get; } = new(24_000, 1, 16);
 
     public AudioFormat(int sampleRateHz, int channelCount, int bitsPerSample)
