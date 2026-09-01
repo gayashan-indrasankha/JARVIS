@@ -15,5 +15,10 @@ public sealed class InfrastructureDependencyTests
 
         Assert.Contains("Jarvis.Core", referencedAssemblies, StringComparer.Ordinal);
         Assert.DoesNotContain("Jarvis.Host", referencedAssemblies, StringComparer.Ordinal);
+        Assert.DoesNotContain(
+            referencedAssemblies,
+            static reference =>
+                reference.StartsWith("OpenAI", StringComparison.Ordinal) ||
+                reference.StartsWith("System.Net.WebSockets", StringComparison.Ordinal));
     }
 }

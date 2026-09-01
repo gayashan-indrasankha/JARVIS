@@ -1,7 +1,9 @@
 using Jarvis.Core.Voice;
 using Jarvis.Infrastructure.Configuration;
 using Jarvis.Infrastructure.Voice;
-using Jarvis.Infrastructure.Voice.OpenAi;
+using Jarvis.Infrastructure.Voice.Local;
+using Jarvis.Infrastructure.Voice.Local.Llama;
+using Jarvis.Infrastructure.Voice.Local.Sherpa;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -20,67 +22,106 @@ public static class ServiceCollectionExtensions
             .AddOptions<JarvisOptions>()
             .Bind(configuration.GetSection(JarvisOptions.SectionName))
             .Validate(
-                options => !string.IsNullOrWhiteSpace(options.InstanceName),
-                $"{JarvisOptions.SectionName}:InstanceName must not be empty.")
+                options => IsSafeIdentifier(options.InstanceName, 64),
+                $"{JarvisOptions.SectionName}:InstanceName must be a safe identifier.")
             .ValidateOnStart();
 
         services
             .AddOptions<VoiceOptions>()
             .Bind(configuration.GetSection(VoiceOptions.SectionName))
             .Validate(
-                options => !options.Enabled ||
-                    HasSafeCredential(options.OpenAi.ApiKey),
-                "The realtime provider credential is missing. Configure it with user secrets or JARVIS_Voice__OpenAI__ApiKey.")
-            .Validate(
-                options => IsOfficialOpenAiRealtimeEndpoint(options.OpenAi.Endpoint),
-                "Voice:OpenAI:Endpoint must be the official secure OpenAI realtime endpoint.")
-            .Validate(
-                options => !string.IsNullOrWhiteSpace(options.OpenAi.Model) &&
-                    !string.IsNullOrWhiteSpace(options.OpenAi.Voice) &&
-                    IsSafeProviderIdentifier(options.OpenAi.Model, 128) &&
-                    IsSafeProviderIdentifier(options.OpenAi.Voice, 64) &&
+                options => IsSafeIdentifier(options.SpeechRecognitionProfile, 64) &&
+                    IsSafeIdentifier(options.TtsVoice, 64) &&
                     Enum.IsDefined(options.ActivationMode) &&
-                    !string.IsNullOrWhiteSpace(options.Instructions) &&
-                    options.Instructions.Length <= VoiceDataLimits.MaximumInstructionsCharacters,
-                "Voice:OpenAI model and voice must not be empty and instructions must be bounded.")
+                    !string.IsNullOrWhiteSpace(options.Persona) &&
+                    options.Persona.Length <= VoiceDataLimits.MaximumInstructionsCharacters &&
+                    !options.Persona.Any(static character => character == '\0'),
+                "Voice profiles, activation mode, and persona are invalid.")
             .Validate(
-                options => options.OpenAi.ConnectTimeoutSeconds is >= 1 and <= 120 &&
-                    options.OpenAi.MaximumReconnectAttempts is >= 0 and <= 100 &&
-                    options.OpenAi.InitialReconnectDelayMilliseconds >= 1 &&
-                    options.OpenAi.MaximumReconnectDelayMilliseconds >=
-                        options.OpenAi.InitialReconnectDelayMilliseconds,
-                "Voice:OpenAI reconnect and timeout settings are invalid.")
-            .Validate(
-                options => options.Audio.CaptureBufferMilliseconds is >= 10 and <= 500 &&
+                options => options.TtsSpeed is >= 0.5F and <= 2.0F &&
+                    options.Audio.CaptureBufferMilliseconds is >= 10 and <= 500 &&
                     options.Audio.MaximumPlaybackBufferMilliseconds is >= 500 and <= 30_000 &&
                     options.Audio.InputDeviceNumber >= -1 &&
                     options.Audio.OutputDeviceNumber >= -1,
-                "Voice audio buffer settings are invalid.")
+                "Voice speed or audio buffer settings are invalid.")
+            .Validate(
+                options => options.VoiceActivityDetection.Threshold is >= 0.1F and <= 0.95F &&
+                    options.VoiceActivityDetection.MinimumSilenceSeconds is >= 0.1F and <= 3.0F &&
+                    options.VoiceActivityDetection.MinimumSpeechSeconds is >= 0.05F and <= 2.0F &&
+                    options.VoiceActivityDetection.MaximumSpeechSeconds is >= 2.0F and <= 60.0F,
+                "Voice activity-detection settings are invalid.")
+            .Validate(
+                options => options.ResponseSegmentation.MinimumSentenceCharacters is >= 8 and <= 120 &&
+                    options.ResponseSegmentation.MinimumClauseCharacters >=
+                        options.ResponseSegmentation.MinimumSentenceCharacters &&
+                    options.ResponseSegmentation.MinimumClauseCharacters <= 240 &&
+                    options.ResponseSegmentation.MaximumSegmentCharacters >=
+                        options.ResponseSegmentation.MinimumClauseCharacters &&
+                    options.ResponseSegmentation.MaximumSegmentCharacters <=
+                        VoiceDataLimits.MaximumSpeechSegmentCharacters,
+                "Voice response-segmentation settings are invalid.")
+            .Validate(
+                options => !options.WakeWord.AlwaysListeningEnabled || options.Enabled,
+                "Voice must be enabled when always-listening wake-word detection is enabled.")
+            .Validate(
+                options => string.Equals(
+                        options.WakeWord.Phrase,
+                        "Jarvis",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    float.IsFinite(options.WakeWord.KeywordScore) &&
+                    options.WakeWord.KeywordScore is >= 0.1F and <= 10.0F &&
+                    float.IsFinite(options.WakeWord.KeywordThreshold) &&
+                    options.WakeWord.KeywordThreshold is >= 0.01F and <= 0.99F &&
+                    double.IsFinite(options.WakeWord.CooldownSeconds) &&
+                    options.WakeWord.CooldownSeconds is >= 0.5 and <= 60.0 &&
+                    double.IsFinite(options.WakeWord.ContinuationWindowSeconds) &&
+                    options.WakeWord.ContinuationWindowSeconds is >= 2.0 and <= 600.0 &&
+                    options.WakeWord.Acknowledgement is not null &&
+                    options.WakeWord.Acknowledgement.Length <= 80 &&
+                    !options.WakeWord.Acknowledgement.Any(char.IsControl),
+                "Voice wake-word settings are invalid. This release supports the phrase Jarvis.")
             .ValidateOnStart();
 
-        services.AddSingleton<IRealtimeTransportFactory, ClientWebSocketRealtimeTransportFactory>();
-        services.AddSingleton<IRealtimeConversationProvider, OpenAiRealtimeProvider>();
+        services
+            .AddOptions<LocalAiOptions>()
+            .Bind(configuration.GetSection(LocalAiOptions.SectionName))
+            .Validate(
+                options => Enum.IsDefined(options.RuntimeMode) &&
+                    string.Equals(options.Host, "127.0.0.1", StringComparison.Ordinal) &&
+                    IsSafeIdentifier(options.ModelId, 64),
+                "LocalAi must use a supported runtime/model and bind exactly to 127.0.0.1.")
+            .Validate(
+                options => options.Port is >= 1 and <= 65_535 &&
+                    options.ContextSize is >= 4_096 and <= 32_768 &&
+                    options.GpuLayers is >= 0 and <= 99 &&
+                    options.Threads is >= 1 and <= 64 &&
+                    options.StartupTimeoutSeconds is >= 5 and <= 600 &&
+                    options.MaximumOutputTokens is >= 1 and <= 4_096,
+                "LocalAi resource or timeout settings are invalid.")
+            .ValidateOnStart();
+
+        services.AddSingleton(static _ => JarvisDataPaths.Create());
+        services.AddSingleton<LocalAssetPaths>();
+        services.AddSingleton<ILoopbackHttpClientFactory, LoopbackHttpClientFactory>();
+        services.AddSingleton<IManagedProcessFactory, SystemManagedProcessFactory>();
+        services.AddSingleton<ILlamaServerHealthProbe, LlamaServerHealthProbe>();
+        services.AddSingleton<ILlamaServerSupervisor, LlamaServerSupervisor>();
+        services.AddSingleton<IVoiceMetrics, StructuredVoiceMetrics>();
+        services.AddSingleton<ILanguageModel, LlamaCppLocalLanguageModel>();
+        services.AddSingleton<IVoiceActivityDetector, SherpaOnnxVoiceActivityDetector>();
+        services.AddSingleton<ISpeechRecognizer, SherpaOnnxSpeechRecognizer>();
+        services.AddSingleton<ISpeechSynthesizer, SherpaOnnxKokoroSpeechSynthesizer>();
         services.AddSingleton<IAudioCapture, WindowsMicrophoneCapture>();
         services.AddSingleton<IAudioPlayback, WindowsSpeakerPlayback>();
-        services.AddSingleton<IWakeWordDetector, DisabledWakeWordDetector>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<IWakeWordDetector, SherpaOnnxKeywordSpotter>();
         services.AddSingleton<RealtimeVoiceCoordinator>();
 
         return services;
     }
 
-    private static bool HasSafeCredential(string? credential) =>
-        !string.IsNullOrWhiteSpace(credential) &&
-        credential.All(character => !char.IsControl(character));
-
-    private static bool IsOfficialOpenAiRealtimeEndpoint(Uri endpoint) =>
-        endpoint.Scheme == Uri.UriSchemeWss &&
-        endpoint.IsDefaultPort &&
-        string.Equals(endpoint.IdnHost, "api.openai.com", StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(endpoint.AbsolutePath, "/v1/realtime", StringComparison.Ordinal) &&
-        string.IsNullOrEmpty(endpoint.Query) &&
-        string.IsNullOrEmpty(endpoint.Fragment);
-
-    private static bool IsSafeProviderIdentifier(string value, int maximumLength) =>
+    private static bool IsSafeIdentifier(string value, int maximumLength) =>
+        !string.IsNullOrWhiteSpace(value) &&
         value.Length <= maximumLength &&
         value.All(character =>
             char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');

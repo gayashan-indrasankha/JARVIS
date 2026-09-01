@@ -24,7 +24,7 @@ internal sealed class WindowsMicrophoneCapture : IAudioCapture
         _logger = logger;
     }
 
-    public AudioFormat Format => AudioFormat.Pcm16Mono24Khz;
+    public AudioFormat Format => AudioFormat.Pcm16Mono16Khz;
 
     public async IAsyncEnumerable<AudioFrame> CaptureAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken)

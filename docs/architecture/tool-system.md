@@ -4,15 +4,15 @@
 
 Tools are the only route from reasoning to local observation or action. They translate a narrow, typed request into deterministic code running under local policy. The tool system is not a generic plugin shell and catalog membership never implies permission.
 
-This document is a design contract for a later milestone. Version 0.0 contains no operating-system tools or tool runtime.
+This document is a design contract for a later milestone. Version 0.1 contains no operating-system tools or tool runtime.
 
 ## Design goals
 
-- Prevent a model or untrusted content from directly invoking OS or provider APIs.
+- Prevent a model or untrusted content from directly invoking OS or external-service APIs.
 - Make every request schema-valid, policy-evaluated, cancellable, bounded, and auditable.
 - Give the user an accurate preview of security-relevant effects.
 - Make adapters testable without a model or interactive desktop.
-- Preserve provider independence by translating provider function formats at the edge.
+- Preserve model-runtime independence by translating model function formats at the edge.
 - Support useful read operations without allowing bulk data collection.
 
 ## Core concepts
@@ -52,7 +52,7 @@ Unknown fields and unknown enum values are rejected. Compatibility changes incre
 
 The required order is:
 
-1. **Receive proposal** — translate a provider-neutral tool proposal and assign local identifiers.
+1. **Receive proposal** — translate a model-runtime-neutral tool proposal and assign local identifiers.
 2. **Lookup** — resolve only a trusted catalog entry with an exact supported version.
 3. **Deserialize and validate** — apply size, type, format, range, and closed-schema checks.
 4. **Normalize and resolve** — canonicalize paths, identities, application targets, and units without causing the requested side effect.
@@ -94,7 +94,7 @@ After approval, any meaningful change produces a new request. In particular, no 
 
 Tool results distinguish operational status from domain data. A successful API call with a partially completed side effect is not `Success`. Errors have stable categories for orchestration and separate redacted messages for the user/model.
 
-Before returning output to a provider:
+Before returning output to a model:
 
 - enforce byte/item/token limits;
 - strip terminal control sequences and reject unexpected binary data;
@@ -141,7 +141,7 @@ Prefer accessibility and application APIs over coordinate clicks. Bind approval 
 
 ### Network and external services
 
-Declare destination, method, data class, and external side effects. Egress policy and user consent apply separately from local read approval. Tool adapters never reuse the AI provider's credentials implicitly.
+Declare destination, method, data class, and external side effects. Egress policy and user consent apply separately from local read approval. Tool adapters never reuse inference-runtime credentials or authorization implicitly.
 
 ## Testing requirements
 

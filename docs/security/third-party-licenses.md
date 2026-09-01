@@ -1,0 +1,26 @@
+# Third-party runtime and model licenses
+
+This is the version 0.1.1 engineering inventory, not legal advice. JARVIS source control contains no third-party model weight or native runtime. The setup script downloads artifacts directly from their recorded upstream locations for local use. Any installer, redistribution, commercial distribution, or hosted model offering must repeat legal review and preserve the exact license/notice files shipped with the selected versions.
+
+| Component | Selected artifact | Upstream terms/provenance | Repository obligation |
+| --- | --- | --- | --- |
+| llama.cpp | `b10708` Windows CPU/CUDA runtime | [MIT](https://github.com/ggml-org/llama.cpp/blob/b10708/LICENSE); bundled third-party notices remain applicable | Preserve the MIT copyright/license and the release's third-party notices when redistributing binaries. |
+| CUDA runtime libraries | llama.cpp CUDA 12.4 companion archive | NVIDIA redistributables are governed by the [CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/index.html), not by llama.cpp's MIT license | The current script downloads them for the user. Packaging or redistribution requires separate NVIDIA-terms review; CPU mode avoids this component. |
+| Qwen3 LLM and GGUF quantization | official `Qwen/Qwen3-4B-GGUF`, `Q4_K_M` | [Apache-2.0](https://huggingface.co/Qwen/Qwen3-4B-GGUF/blob/main/LICENSE); the GGUF is published by the model owner rather than an untracked converter | Preserve license/NOTICE material and attribution when redistributing. Do not imply that Apache-2.0 resolves rights in user inputs or generated output. |
+| sherpa-onnx .NET/native runtime | NuGet `org.k2fsa.sherpa.onnx` 1.13.5 and RID runtime packages | [Apache-2.0](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.5/LICENSE) | Preserve license and NOTICE material for redistributed packages/native binaries. |
+| ONNX Runtime/native inference dependency | transitively built/bundled by sherpa-onnx | [ONNX Runtime MIT](https://github.com/microsoft/onnxruntime/blob/main/LICENSE); [ONNX specification Apache-2.0](https://github.com/onnx/onnx/blob/main/LICENSE) | Preserve applicable upstream notices from the exact sherpa binary distribution. |
+| Silero VAD model | `silero_vad.onnx` from sherpa-onnx release | [Silero VAD MIT](https://github.com/snakers4/silero-vad/blob/master/LICENSE) | Preserve its MIT notice if the model is redistributed. |
+| Zipformer ASR model | `sherpa-onnx-streaming-zipformer-en-20M-2023-02-17` | The [source model card is Apache-2.0](https://huggingface.co/desh2608/icefall-asr-librispeech-pruned-transducer-stateless7-streaming-small); sherpa documents that it was trained on [LibriSpeech, CC BY 4.0](https://www.openslr.org/12/) | Preserve the model license and training-data provenance/attribution. The release archive has no authoritative checksum, so redistribution and production packaging require an additional provenance review. |
+| Zipformer KWS model | `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01` int8 encoder/decoder/joiner | The archive metadata identifies Apache-2.0 and training on [GigaSpeech XL](https://github.com/SpeechColab/GigaSpeech); distributed by the [sherpa-onnx KWS release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models) | Preserve archive metadata and GigaSpeech provenance. The tracked archive is pinned by repository-verified SHA-256 and byte length; packaging still requires exact notice review. |
+| Kokoro model and English voices | `kokoro-en-v0_19` | [Kokoro-82M Apache-2.0](https://huggingface.co/hexgrad/Kokoro-82M); upstream [voice provenance](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md); sherpa's archive includes its own `LICENSE` | Preserve the archive license and voice provenance. Review the selected voice data terms again before redistribution; the current project makes no broader rights claim. |
+| eSpeak NG phonemizer data | `espeak-ng-data` inside the Kokoro archive | [GPL-3.0](https://github.com/espeak-ng/espeak-ng/blob/master/COPYING) | Redistribution must satisfy GPL-3.0 for this component, including license/source obligations as applicable. The current source repository does not redistribute it. |
+| NAudio | `NAudio.WinMM` 3.0.1 and transitive NAudio packages | [MIT](https://github.com/naudio/NAudio/blob/v3.0.1/LICENSE) | Preserve the MIT notice when redistributing binaries. |
+| .NET and Microsoft.Extensions | .NET 10 / Microsoft.Extensions 10.0.0 | [.NET runtime MIT](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT) plus third-party notices | Preserve the SDK/runtime and package notices required by the chosen deployment mode. |
+
+## Quality-gate rules
+
+- Pins and checksums in `config/local-model-manifest.json` establish artifact identity; they do not replace license review.
+- Any packaged or redistributed runtime/model bundle must retain the applicable upstream `LICENSE`, `NOTICE`, README, and provenance files.
+- Do not copy native or model artifacts into Git.
+- Before producing a distributable installer, generate a complete software/model bill of materials from the actual published output, collect exact notice files, decide whether CUDA components will be redistributed, and obtain legal approval.
+- A future model/runtime change must update this inventory and the tracked manifest in the same change.

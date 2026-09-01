@@ -1,167 +1,92 @@
-# Security architecture
+# Security and privacy architecture
 
-## Security objective
+JARVIS treats model output, speech recognition, configuration, local files, future tool proposals, and native-process diagnostics as untrusted input. Local execution improves privacy and availability but does not make a model authoritative or a native runtime harmless.
 
-JARVIS should be useful on a personal Windows machine without converting probabilistic model output, untrusted content, or a compromised provider into operating-system authority. Security depends on local deterministic controls, least privilege, explicit consent, traceability, and data minimization.
+## Assets and adversaries
 
-JARVIS is not an endpoint protection product and cannot grant stronger access control than Windows provides. It must still defend its own tool, provider, configuration, and data boundaries.
+Protected assets include user files, credentials, private audio/transcripts, project source, device control, future memory/audit records, local model/runtime integrity, and the user's trust in reported actions. Relevant threats include malicious model output, prompt injection, unsafe future tools, path/command injection, hostile local processes connecting to a listening inference server, native/model supply-chain compromise, secret/log leakage, accidental data retention, and resource exhaustion.
 
-## Trust model
+JARVIS runs as the interactive user, never in the kernel and never as an administrator by default. It does not claim isolation from malware already executing as that same user. Loopback binding reduces network exposure but is not authentication against all same-user local processes; managed-mode ephemeral authentication adds defense in depth.
 
-Trusted only to the degree required:
+## Trust boundaries
 
-- reviewed local JARVIS binaries and policy code;
-- the signed-in user for explicit approvals;
-- Windows identity and access control for the current process;
-- configured local stores after integrity and access checks.
+```text
+User/audio/text
+  -> Host input validation
+  -> provider-neutral Core orchestration
+  -> Infrastructure native/model adapters
+       -> in-process sherpa-onnx
+       -> supervised llama-server on authenticated 127.0.0.1 HTTP
 
-Always untrusted input:
+Model output (untrusted)
+  -X-> direct filesystem/process/shell/UI/network access
+  -> future typed tool proposal -> authorization -> approval -> adapter -> audit
+```
 
-- model responses and tool arguments proposed by a model;
-- remote providers and network responses;
-- repository files, filenames, metadata, documents, web content, terminal output, window text, and accessibility trees;
-- audio transcripts and wake-word detections;
-- plugins, adapters, tool manifests, and serialized historical state until validated;
-- environment variables, command-line arguments, and local configuration that can be modified outside the process.
+The 0.1.1 model request has no tool definitions and the model adapter references no OS action service. Wake inference receives only transient microphone frames and has no LLM, network, filesystem, or tool reference. Voice inference cannot bypass the future authorization kernel.
 
-Untrusted content can contain instructions designed to redirect the model. Such content is data, not authorization.
+## Offline/network policy
 
-## Protected assets
+The normal production runtime is offline-capable after explicit installation:
 
-- User files, credentials, tokens, private keys, browser/session data, messages, source code, and personal information.
-- The user's Windows session, running applications, processes, input devices, network identity, and hardware.
-- Authorization policy and approval history.
-- Tool catalog integrity and executable adapter mappings.
-- Audit completeness and integrity.
-- Project indexes, memory, transcripts, recordings, and learning history.
-- Provider account quotas and billable operations.
+- no external HTTP or WebSocket endpoint;
+- no cloud AI SDK or credential;
+- no telemetry, analytics, crash upload, updater, or background download;
+- no transcript, prompt, response, raw audio, file, screenshot, repository, or tool-result upload;
+- local language-model traffic is constrained to exact `http://127.0.0.1:<validated-port>/`;
+- HTTP proxy use, redirects, cookies, user-info, queries, fragments, wildcard binds, remote hosts, and hostname resolution are disabled/rejected.
 
-## Principal threats
+The guarantee covers JARVIS production paths. `scripts/setup-local-ai.ps1` is an explicitly invoked external-download workflow and NuGet restore is a development/build workflow. The native artifacts and operating system have their own trust boundaries. Disconnecting the network during the manual test verifies behavior, not immunity from compromised dependencies.
 
-1. A model fabricates or expands a tool request beyond the user's intent.
-2. Prompt injection in a file, window, tool result, or retrieved document attempts to trigger actions or exfiltration.
-3. Argument injection, path confusion, symlinks/junctions, shell metacharacters, or time-of-check/time-of-use changes escape an approved scope.
-4. An approval is replayed or applied to modified arguments.
-5. Sensitive content leaks through remote context, logs, traces, crash dumps, notifications, or audit records.
-6. A compromised dependency, adapter, or update gains local process authority.
-7. Denial of service consumes CPU, memory, storage, audio devices, provider quota, or attention.
-8. Stale indexes or memory produce confident but incorrect actions.
-9. Audit failure hides an attempted or completed side effect.
-10. UI automation acts on a different window, desktop, or state than the one the user approved.
+## Local inference process
 
-## Authorization model
+Managed llama.cpp launches directly with `UseShellExecute=false`, a separate argument list, redirected diagnostics, no visible window, fixed loopback bind, offline mode, disabled agent/tools/UI/MCP proxy, restrictive CORS, and no model-controlled arguments. The inherited environment is discarded; the child receives only required Windows runtime/temp paths plus its cryptographically random llama credential. It therefore does not inherit unrelated cloud, source-control, proxy, model-router, prompt-log, MCP, media, or tool credentials/settings. The configured model ID selects one known relative path; arbitrary executable/model paths are not accepted. The child credential exists only in its environment and the local HttpClient header. It is not placed on the process command line, persisted, or logged.
 
-Every side-effecting tool invocation passes through one authorization service. Read-only operations also require policy because reading can disclose sensitive data or incur cost.
+Health checks and startup are bounded. There is at most one context fallback and no automatic restart storm. Cancellation and shutdown kill the entire managed process tree. Raw child output is drained to avoid deadlock but only recognized classes (`gpu_out_of_memory`, `model_load_failed`, `port_in_use`) enter JARVIS logs. Prompts, responses, hidden reasoning, command lines, environment blocks, and raw native diagnostics are excluded.
 
-A policy decision is one of:
+External mode is explicit and loopback-only. Because 0.1 has no configuration for an external server credential, users should not expose or share that process; JARVIS validates health but does not own its lifecycle.
 
-- **Allow** — policy permits this exact request without an interactive prompt.
-- **Require approval** — execution pauses until the user explicitly approves this exact request and scope.
-- **Deny** — execution does not occur; the reason is safe to show and is audited.
+## Paths, configuration, and artifacts
 
-Policy considers the authenticated local user, session state, tool identifier and version, normalized arguments, target resources, data sensitivity, reversibility, current application/window context, origin of the request, prior grants, rate limits, and runtime posture. Unknown tools, fields, enum values, paths, identities, or policy errors fail closed.
+`JARVIS_HOME` must be fully qualified, contain no control character, be outside Git, not traverse an existing reparse point, and not be a filesystem root. Asset resolution rejects rooted relative values, canonicalizes under the expected subtree, and rejects existing reparse-point components, preventing lexical or junction/symlink escape. Tracked configuration stores logical IDs and numeric safe defaults, not absolute machine paths or identity.
 
-Indicative risk classes:
+Model weights, ONNX files, native runtime archives/binaries, local installation metadata, logs, caches, databases, indexes, and environment-specific settings are ignored and belong under `%LOCALAPPDATA%\JARVIS` (or explicit `JARVIS_HOME`). The tracked manifest pins upstream URLs, versions, names, licenses, and authoritative SHA-256 values where available. Setup verifies known hashes, cleans failed partial downloads, validates archive paths/types, extracts model archives into a private staging directory before moving them into place, and explicitly warns for the Zipformer archive whose upstream authoritative hash is unavailable. Setup installs nothing globally and never runs during app startup.
 
-| Class | Examples | Default posture |
-| --- | --- | --- |
-| Local low-risk read | Public system version, opted-in project metadata | Allow only within configured scope and limits |
-| Sensitive read | Personal files, screen contents, credentials-adjacent paths | Explicit scope; approval when context is not already user-selected |
-| Reversible side effect | Launching an app, creating a new file in an approved workspace | Policy-limited; approval based on scope and frequency |
-| Destructive or external side effect | Delete/overwrite, process termination, sending data, purchases, messages | Exact explicit approval; deny when safe preview or identity is unavailable |
-| Privileged/security-sensitive | Elevation, credential access, security settings, persistence mechanisms | Deny by default; require a dedicated design before any implementation |
+No API key or user secret is part of runtime configuration. Environment variables may reveal non-secret configuration to same-user processes and must not be repurposed for future secrets without a dedicated design.
 
-Approval fatigue is a security defect. Policies should support clear scoped grants, previews, and safe batch semantics without turning a past approval into ambient authority.
+## Private data and logging
 
-## Approval binding
+Raw microphone frames—including audio captured while sleeping—synthesized audio, ASR transcripts, prompts, model responses, hidden reasoning, and conversation history are transient memory only by default. The keyword spotter converts each bounded frame for immediate in-memory inference, retains no recording buffer beyond native streaming state, and releases dormant capture before conversation capture begins. Structured logs and `IVoiceMetrics` contain event IDs, component/failure codes, safe numeric tuning, durations, rates, and a cumulative false-activation count. They exclude content and native diagnostic lines. Console transcript display is an intentional interactive debugging feature; shell redirection can persist it and is a user privacy choice.
 
-An approval record must bind at least:
+Error messages shown to users are stable/actionable but do not expose stack traces, raw model responses, environment variables, child command lines, or local personal paths. Development logs and crash dumps can still capture process memory; production packaging must document and minimize dump collection.
 
-- user and interactive session;
-- tool identifier and contract version;
-- canonical normalized arguments or their cryptographic digest;
-- target resource scope and sensitivity;
-- human-readable preview shown to the user;
-- issue and expiry time;
-- one-shot or explicitly bounded reuse rules;
-- correlation identifier and policy version.
+## Resource and denial-of-service controls
 
-Any material argument, target, context, or tool-version change invalidates the approval. A model cannot approve, dismiss, or synthesize approval. Approval UI must make cancellation and denial at least as accessible as confirmation.
+- exact audio formats and maximum frame/text/instruction/event sizes;
+- bounded notification, speech-segment, callback-audio, and playback queues;
+- bounded conversation message/character history and maximum output tokens;
+- single ordered TTS producer and one llama parallel request;
+- bounded native startup/health polling and linked cancellation;
+- tunable context, GPU layers, threads, audio buffers, VAD limits, and TTS speed;
+- one keyword-spotter inference thread, configurable score/threshold, cooldown suppression, and a bounded continuation timer.
 
-## Tool execution controls
+Native model loading can still consume substantial memory and time. GPU OOM is reported with guidance to lower GPU layers/use CPU; it never justifies a wider network bind or a disabled safety check.
 
-- Validate syntax and semantics before policy evaluation.
-- Resolve canonical paths and identities as close to execution as possible, and re-check safety after resolution.
-- Pass typed arguments directly to OS APIs. Do not concatenate shell command strings.
-- Apply timeouts, cancellation, output limits, rate limits, and concurrency limits.
-- Use the current user's least-privileged token and Windows ACLs; do not silently elevate.
-- Prevent arbitrary adapter loading or tool registration from model-provided identifiers.
-- Separate preview/planning from commit when an operation supports it.
-- Return structured errors that do not disclose secrets or internal handles.
+## Future tool authorization invariant
 
-General shell execution is exceptionally high risk. A future design must prefer executable allowlists and structured argument arrays, define working-directory and environment rules, block interactive/elevation behavior, cap output and duration, and explicitly address PowerShell/cmd parsing. It must receive a dedicated ADR and threat review.
+When computer-control tools arrive, every side effect must enter one non-bypassable typed dispatcher. Policy considers tool identity, normalized target, arguments, sensitivity, user/session context, and requested scope. Outcomes are allow, deny, or explicit approval. Execution occurs only after allow/approval, and every attempt/result is audited with content minimization. Models never receive direct shell, filesystem, process, Windows UI, database, or hardware handles.
 
-## Prompt-injection containment
+## Verification
 
-- Label provider instructions, user instructions, retrieved content, and tool output by origin.
-- Never treat content inside retrieved data as policy, consent, or a tool request.
-- Tool requests must conform to the local catalog; extra fields and unknown tool names are rejected.
-- Minimize tool output before returning it to a model and remove control sequences or unsafe binary content.
-- Require authorization based on user intent and local policy, not the model's explanation of why an action is safe.
-- Test with malicious filenames, source comments, documents, transcripts, and window text.
+Automated architecture tests reject outer/model/native/network dependencies from Core. Configuration/path/loopback tests reject unsafe values. Supervisor tests cover lifecycle, fallback, cancellation, and missing assets without real processes. Orchestration tests cover barge-in and stale output. Repository gates scan for secrets, external endpoint remnants, tracked model/runtime artifacts, and warnings.
 
-Prompt injection cannot be solved only with a system prompt. The security boundary is local validation, authorization, and limited execution.
+Physical device release, GPU behavior, local process termination, offline operation, and privacy log inspection are explicitly manual in [the smoke test](../testing/manual-voice-smoke-test.md).
 
-## Audit requirements
+## Deferred decisions
 
-Every tool attempt creates correlated records for proposal, validation, policy decision, approval, execution start, and terminal result. Denied, cancelled, timed-out, invalid, and failed requests are recorded as well as successes.
-
-Audit events include timestamps, event and correlation identifiers, local actor/session, tool and policy versions, redacted/canonical argument summary, decision and reason code, approval reference, duration, result classification, and bounded resource-impact metadata.
-
-Audit events must not include raw secrets, complete sensitive files, unrestricted screen text, full audio, or unbounded process output. Sensitive fields use explicit redaction or keyed digests. Access, retention, rotation, export, deletion, integrity protection, and behavior when the audit sink is unavailable must be decided before side-effecting tools ship. High-risk execution should fail closed if its required audit record cannot be durably written.
-
-## Secrets and configuration
-
-- Commit only non-sensitive defaults.
-- Use .NET user secrets for local development; they live outside the repository and are not a production store.
-- Use environment variables only when process/environment disclosure risk is understood.
-- Never accept secrets through model context or log them during validation failures.
-- Future provider credentials should use a Windows-protected or dedicated secret store, have least privilege, support rotation/revocation, and be separated by environment.
-- Do not store credentials in SQLite, project indexes, memory records, transcripts, or audit payloads.
-- Secret scanning belongs in local/CI validation before provider integration begins.
-
-The repository ignores common local settings, key files, logs, databases, and indexes. Ignore rules reduce accidents but are not a security boundary.
-
-## Local data protection
-
-Before persistent personal data ships, define:
-
-- the exact data classes and purpose;
-- storage location and Windows ACL expectations;
-- encryption requirements and key ownership;
-- retention defaults and maximums;
-- user view, export, correction, and deletion workflows;
-- backup and deletion semantics;
-- corruption recovery and schema migrations.
-
-Memory must preserve provenance and uncertainty. Project indexes must be disposable and rebuildable. Deleting a source or revoking a root should remove derived data according to documented timing.
-
-## Dependency and update security
-
-Dependencies require a purpose, license review, maintained provenance, and a plan for vulnerability updates. Pin versions centrally and review transitive changes. Provider SDKs, parsers, audio codecs, and UI automation libraries are especially sensitive because they process hostile or complex input.
-
-Binary update signing and delivery are not designed in 0.0. Auto-update must not be added casually; it changes the trust and code-execution boundary.
-
-## 0.1 voice security posture
-
-Version 0.1 adds an explicitly started remote voice session and therefore adds microphone, provider-network, credential, and transcript exposure. Its controls are:
-
-- the credential is loaded from user secrets or `JARVIS_` environment configuration and is never part of a Core object, protocol payload, committed setting, exception display, or log field;
-- the configured credential-bearing connection is restricted to the official secure OpenAI realtime endpoint;
-- microphone frames leave the machine only after `/start` (or configured auto-start), and push-to-talk captures only between `/ptt` and `/send`;
-- raw input/output audio and transcript text are not written to structured logs or storage by JARVIS;
-- provider messages are size-bounded, parsed as untrusted data, and reduced to provider-neutral events with sanitized error codes;
-- outbound queues and reconnect attempts are bounded, and stale audio/turn messages are discarded rather than replayed after reconnect;
-- the provider adapter has no tool catalog or operating-system action authority. Version 0.1 contains no computer-control tools.
-
-The debug console intentionally displays assistant transcript text to the interactive user. Redirecting console output can persist that text and is therefore a user-controlled privacy decision. OpenAI-side data handling is governed by the selected account and service terms; JARVIS does not make a local-retention claim about provider processing.
+- signed distribution and verified native/model update channel;
+- crash-dump/diagnostic retention policy;
+- audit persistence encryption and user deletion controls;
+- Windows sandboxing/job-object hardening for native inference;
+- external local-server authentication configuration;
+- concrete authorization/approval UI for OS tools.
