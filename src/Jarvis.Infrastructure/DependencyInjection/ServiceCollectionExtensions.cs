@@ -98,6 +98,7 @@ public static class ServiceCollectionExtensions
                     options.GpuLayers is >= 0 and <= 99 &&
                     options.Threads is >= 1 and <= 64 &&
                     options.StartupTimeoutSeconds is >= 5 and <= 600 &&
+                    options.GenerationTimeoutSeconds is >= 10 and <= 900 &&
                     options.MaximumOutputTokens is >= 1 and <= 4_096,
                 "LocalAi resource or timeout settings are invalid.")
             .ValidateOnStart();
@@ -128,6 +129,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAgentPlanner, LlamaCppAgentPlanner>();
         services.AddSingleton<ToolPathPolicy>();
         services.AddSingleton<IWindowsActionLauncher, WindowsActionLauncher>();
+        services.AddSingleton<ISafeExecutableResolver, SafeExecutableResolver>();
         services.AddSingleton<IBoundedProcessRunner, BoundedProcessRunner>();
         services.AddSingleton<ISystemMetricsProvider, WindowsSystemMetricsProvider>();
         services.AddSingleton<IToolExecutor<ListDirectoryRequest, ListDirectoryResponse>, ListDirectoryTool>();
@@ -185,6 +187,7 @@ public static class ServiceCollectionExtensions
         if (string.IsNullOrWhiteSpace(root) ||
             root.Length > ToolDataLimits.MaximumPathCharacters ||
             root.Any(char.IsControl) ||
+            root.StartsWith("\\\\", StringComparison.Ordinal) ||
             !Path.IsPathFullyQualified(root))
         {
             return false;

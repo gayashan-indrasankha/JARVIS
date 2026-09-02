@@ -248,11 +248,15 @@ public sealed class ToolDispatcherTests
         Assert.False(rig.Audit.Events.Single().Succeeded);
     }
 
-    [Fact]
-    public async Task OpenFileRejectsExecutableTypesBeforeAuthorization()
+    [Theory]
+    [InlineData("untrusted.cmd")]
+    [InlineData("untrusted.py")]
+    [InlineData("untrusted.html")]
+    [InlineData("untrusted.csproj")]
+    public async Task OpenFileRejectsUnapprovedFileTypesBeforeAuthorization(string fileName)
     {
         using TemporaryDirectory temporary = new();
-        string executable = Path.Combine(temporary.Path, "untrusted.cmd");
+        string executable = Path.Combine(temporary.Path, fileName);
         File.WriteAllText(executable, "echo should-not-run");
         ToolRig rig = new(temporary.Path);
 
@@ -262,7 +266,69 @@ public sealed class ToolDispatcherTests
             CancellationToken.None);
 
         Assert.Equal(ToolExecutionStatus.InvalidRequest, outcome.Status);
-        Assert.Equal("executable_file_open_denied", outcome.ErrorCategory);
+        Assert.Equal("file_type_open_denied", outcome.ErrorCategory);
+        Assert.Equal(0, rig.Authorization.CallCount);
+    }
+
+    [Theory]
+    [InlineData("untrusted.cmd.")]
+    [InlineData("untrusted.cmd ")]
+    public async Task OpenFileRejectsAmbiguousWin32AliasesBeforeAuthorization(string requestedName)
+    {
+        using TemporaryDirectory temporary = new();
+        string executable = Path.Combine(temporary.Path, "untrusted.cmd");
+        File.WriteAllText(executable, "echo should-not-run");
+        ToolRig rig = new(temporary.Path);
+
+        ToolExecutionOutcome outcome = await rig.Dispatcher.ExecuteAsync(
+            new ToolCallProposal(
+                "open_file",
+                Arguments(new { path = Path.Combine(temporary.Path, requestedName) })),
+            new ToolInvocationContext(Guid.NewGuid()),
+            CancellationToken.None);
+
+        Assert.Equal(ToolExecutionStatus.InvalidRequest, outcome.Status);
+        Assert.Equal("ambiguous_windows_path_denied", outcome.ErrorCategory);
+        Assert.Equal(0, rig.Authorization.CallCount);
+        Assert.Equal(0, rig.Launcher.OpenCount);
+    }
+
+    [Fact]
+    public async Task ReadFileRejectsAlternateDataStreamSyntaxBeforeAuthorization()
+    {
+        using TemporaryDirectory temporary = new();
+        string file = Path.Combine(temporary.Path, "README.md");
+        File.WriteAllText(file, "safe");
+        ToolRig rig = new(temporary.Path);
+
+        ToolExecutionOutcome outcome = await rig.Dispatcher.ExecuteAsync(
+            new ToolCallProposal(
+                "read_text_file",
+                Arguments(new { path = file + ":private" })),
+            new ToolInvocationContext(Guid.NewGuid()),
+            CancellationToken.None);
+
+        Assert.Equal(ToolExecutionStatus.InvalidRequest, outcome.Status);
+        Assert.Equal("alternate_data_stream_denied", outcome.ErrorCategory);
+        Assert.Equal(0, rig.Authorization.CallCount);
+    }
+
+    [Fact]
+    public async Task GitMetadataIndirectionIsRejectedBeforeAuthorization()
+    {
+        using TemporaryDirectory temporary = new();
+        File.WriteAllText(Path.Combine(temporary.Path, ".git"), "gitdir: C:\\outside");
+        ToolRig rig = new(temporary.Path);
+
+        ToolExecutionOutcome outcome = await rig.Dispatcher.ExecuteAsync(
+            new ToolCallProposal(
+                "get_git_status",
+                Arguments(new { repositoryPath = temporary.Path })),
+            new ToolInvocationContext(Guid.NewGuid()),
+            CancellationToken.None);
+
+        Assert.Equal(ToolExecutionStatus.InvalidRequest, outcome.Status);
+        Assert.Equal("git_indirection_denied", outcome.ErrorCategory);
         Assert.Equal(0, rig.Authorization.CallCount);
     }
 
@@ -423,6 +489,7 @@ public sealed class ToolDispatcherTests
             IOptions<ToolOptions> options = Options.Create(toolOptions);
             ToolPathPolicy pathPolicy = new(options);
             FakeWindowsActionLauncher actions = launcher ?? new FakeWindowsActionLauncher();
+            FakeExecutableResolver executables = new();
             ToolRegistry registry = new(
                 options,
                 pathPolicy,
@@ -435,11 +502,12 @@ public sealed class ToolDispatcherTests
                 new LaunchApplicationTool(actions),
                 new ListProcessesTool(),
                 new GetSystemMetricsTool(new FakeSystemMetricsProvider()),
-                new GetGitStatusTool(pathPolicy, new FakeProcessRunner()),
-                new ExecuteSafeCommandTool(new FakeProcessRunner()));
+                new GetGitStatusTool(pathPolicy, executables, new FakeProcessRunner()),
+                new ExecuteSafeCommandTool(executables, new FakeProcessRunner()));
             Authorization = authorization ?? new RecordingAuthorizationPolicy(
                 ToolAuthorizationDecision.Allowed);
             Audit = new RecordingAuditSink();
+            Launcher = actions;
             Dispatcher = new ToolDispatcher(registry, Authorization, Audit, TimeProvider.System);
         }
 
@@ -448,6 +516,8 @@ public sealed class ToolDispatcherTests
         public RecordingAuthorizationPolicy Authorization { get; }
 
         public RecordingAuditSink Audit { get; }
+
+        public FakeWindowsActionLauncher Launcher { get; }
     }
 
     private sealed class RecordingAuthorizationPolicy(ToolAuthorizationDecision decision) :
@@ -584,6 +654,16 @@ public sealed class ToolDispatcherTests
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new BoundedProcessResult(0, string.Empty, string.Empty, false));
         }
+    }
+
+    private sealed class FakeExecutableResolver : ISafeExecutableResolver
+    {
+        public string Resolve(SafeExecutableId executable) => executable switch
+        {
+            SafeExecutableId.Dotnet => "C:\\trusted\\dotnet.exe",
+            SafeExecutableId.Git => "C:\\trusted\\git.exe",
+            _ => throw new InvalidOperationException(),
+        };
     }
 
     private sealed class TemporaryDirectory : IDisposable

@@ -33,4 +33,47 @@ public sealed class LoopbackEndpointTests
         Assert.Throws<InvalidOperationException>(() =>
             factory.Create(new Uri(endpoint), authenticationToken: null));
     }
+
+    [Fact]
+    public async Task HealthProbeHasAnInternalDeadline()
+    {
+        LlamaServerHealthProbe probe = new(
+            new FakeHttpClientFactory(new BlockingHandler()),
+            TimeSpan.FromMilliseconds(50));
+
+        bool ready = await probe.IsReadyAsync(
+            new LlamaServerConnection(
+                new Uri("http://127.0.0.1:18080/"),
+                "test-token",
+                8192),
+            CancellationToken.None);
+
+        Assert.False(ready);
+    }
+
+    private sealed class FakeHttpClientFactory(HttpMessageHandler handler) :
+        ILoopbackHttpClientFactory
+    {
+        public HttpClient Create(Uri endpoint, string? authenticationToken)
+        {
+            _ = authenticationToken;
+            return new HttpClient(handler, disposeHandler: false)
+            {
+                BaseAddress = endpoint,
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
+        }
+    }
+
+    private sealed class BlockingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _ = request;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable.");
+        }
+    }
 }

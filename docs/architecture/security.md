@@ -70,6 +70,7 @@ Error messages shown to users are stable/actionable but do not expose stack trac
 - tunable context, GPU layers, threads, audio buffers, VAD limits, and TTS speed;
 - one keyword-spotter inference thread, configurable score/threshold, cooldown suppression, and a bounded continuation timer.
 - one-to-eight configured tool steps per user request, identical-call suppression, one structured-output repair attempt, per-tool deadlines, bounded traversal/output, and a central result cap.
+- bounded local health, planning, and generation requests; a nonresponsive loopback server cannot hold a turn indefinitely.
 
 Native model loading can still consume substantial memory and time. GPU OOM is reported with guidance to lower GPU layers/use CPU; it never justifies a wider network bind or a disabled safety check.
 
@@ -79,7 +80,7 @@ Every OS observation or side effect enters one non-bypassable typed dispatcher. 
 
 The initial policy allows bounded `SAFE_READ` and optionally `SAFE_LOCAL_ACTION`. `Tools:Enabled=false` denies the catalog and `Tools:AllowSafeLocalActions=false` denies visible local actions. `CONFIRM_REQUIRED` and `STRONG_CONFIRM_REQUIRED` fail closed because 0.2 has no interactive grant surface. `DENIED` never runs. JARVIS neither requests elevation nor implements writes, deletion, termination, credential access, generic shell, network tools, or UI automation.
 
-Filesystem tools require canonical targets below explicit existing approved roots, reject existing reparse points and credential-sensitive paths, bound enumeration/file reads, and reject executable/script/link types for document opening. Tracked configuration approves no root. The safe-command contract is a fixed diagnostic enum; executors never concatenate model strings, start PowerShell/`cmd.exe`, inherit the full environment, or accept a model-selected executable/argument.
+Filesystem tools require canonical targets below explicit existing approved local-drive roots; reject UNC/network roots, existing reparse points, credential-sensitive paths, alternate data streams, DOS short-name aliases, and trailing-dot/space aliases; and bound enumeration/file reads. Document opening uses a conservative non-executable extension allowlist so an arbitrary Windows association cannot become an execution path. Git status rejects `.git` indirection files, pins its Git directory and work tree to validated paths, and ignores submodules. Tracked configuration approves no root. The safe-command contract is a fixed diagnostic enum; executors resolve only reviewed executable IDs to fully qualified paths and never concatenate model strings, start PowerShell/`cmd.exe`, inherit the full environment, or accept a model-selected executable/argument.
 
 Every dispatcher terminal path writes an audit event with IDs, tool, decision, timestamps, status, success, sanitized error class, and cancellation/timeout/truncation flags. It deliberately omits arguments, paths, file/process/command content, prompts, responses, and raw exceptions. Structured logs are not yet a durable tamper-resistant audit store.
 

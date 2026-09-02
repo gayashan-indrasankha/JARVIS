@@ -68,6 +68,26 @@ public sealed class LlamaCppLocalLanguageModelTests
     }
 
     [Fact]
+    public async Task NonresponsiveLocalGenerationFailsAtConfiguredDeadline()
+    {
+        await using LlamaCppLocalLanguageModel model = new(
+            new FakeSupervisor(),
+            new FakeHttpClientFactory(new BlockingHandler()),
+            new RecordingMetrics(),
+            TimeSpan.FromMilliseconds(50));
+
+        LocalComponentUnavailableException exception = await Assert.ThrowsAsync<
+            LocalComponentUnavailableException>(async () =>
+                await CollectAsync(model.GenerateAsync(
+                    new LanguageModelRequest(
+                        [new ConversationMessage(ConversationRole.User, "wait")],
+                        64),
+                    CancellationToken.None)));
+
+        Assert.Equal("local_llm_request_timeout", exception.Code);
+    }
+
+    [Fact]
     public async Task MalformedStreamEventIsRejected()
     {
         await using LlamaCppLocalLanguageModel model = new(
@@ -77,6 +97,23 @@ public sealed class LlamaCppLocalLanguageModelTests
 
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
             await CollectAsync(model.GenerateAsync(CreateRequest(), CancellationToken.None)));
+    }
+
+    [Fact]
+    public async Task GracefulDisconnectBeforeDoneIsNotTreatedAsCompletedResponse()
+    {
+        const string incompleteStream =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Partial response.\"}}]}\n";
+        await using LlamaCppLocalLanguageModel model = new(
+            new FakeSupervisor(),
+            new FakeHttpClientFactory(new RecordingHandler(incompleteStream)),
+            new RecordingMetrics());
+
+        LocalComponentUnavailableException exception = await Assert.ThrowsAsync<
+            LocalComponentUnavailableException>(async () =>
+                await CollectAsync(model.GenerateAsync(CreateRequest(), CancellationToken.None)));
+
+        Assert.Equal("local_llm_stream_incomplete", exception.Code);
     }
 
     [Fact]
@@ -141,6 +178,22 @@ public sealed class LlamaCppLocalLanguageModelTests
                 await CollectAsync(model.GenerateAsync(CreateRequest(), CancellationToken.None)));
 
         Assert.Equal("local_llm_unavailable", exception.Code);
+    }
+
+    [Fact]
+    public async Task InterruptedResponseBodyUsesStableContentFreeError()
+    {
+        await using LlamaCppLocalLanguageModel model = new(
+            new FakeSupervisor(),
+            new FakeHttpClientFactory(new InterruptedBodyHandler()),
+            new RecordingMetrics());
+
+        LocalComponentUnavailableException exception = await Assert.ThrowsAsync<
+            LocalComponentUnavailableException>(async () =>
+                await CollectAsync(model.GenerateAsync(CreateRequest(), CancellationToken.None)));
+
+        Assert.Equal("local_llm_stream_interrupted", exception.Code);
+        Assert.DoesNotContain("simulated", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static LanguageModelRequest CreateRequest() =>
@@ -244,6 +297,55 @@ public sealed class LlamaCppLocalLanguageModelTests
             cancellationToken.ThrowIfCancellationRequested();
             throw new HttpRequestException("simulated loopback disconnect");
         }
+    }
+
+    private sealed class InterruptedBodyHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _ = request;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new InterruptedReadStream()),
+            });
+        }
+    }
+
+    private sealed class InterruptedReadStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new IOException("simulated model stream interruption");
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(new IOException("simulated model stream interruption"));
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RecordingMetrics : IVoiceMetrics

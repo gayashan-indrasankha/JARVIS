@@ -57,6 +57,19 @@ public sealed class IncrementalResponseSegmenterTests
     }
 
     [Fact]
+    public void DropsIncompleteInternalMarkerAtEndOfGeneration()
+    {
+        IncrementalResponseSegmenter segmenter = new();
+
+        List<string> segments = [.. segmenter.Append("A safe visible sentence is complete. <thi")];
+        segments.AddRange(segmenter.Complete());
+        string spoken = string.Join(' ', segments);
+
+        Assert.Contains("safe visible sentence", spoken, StringComparison.Ordinal);
+        Assert.DoesNotContain("<thi", spoken, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void UsesConfiguredBoundaries()
     {
         IncrementalResponseSegmenter segmenter = new(

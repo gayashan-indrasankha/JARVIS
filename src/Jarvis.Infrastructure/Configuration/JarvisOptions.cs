@@ -40,6 +40,8 @@ public sealed class LocalAiOptions
 
     public int StartupTimeoutSeconds { get; set; } = 120;
 
+    public int GenerationTimeoutSeconds { get; set; } = 300;
+
     public int MaximumOutputTokens { get; set; } = 512;
 }
 

@@ -57,30 +57,32 @@ internal sealed class ToolPathPolicy
         [".pfx", ".p12", ".pem", ".key", ".ppk", ".kdbx"],
         StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> ExecutableDocumentExtensions = new(
+    private static readonly HashSet<string> OpenableDocumentExtensions = new(
         [
-            ".exe",
-            ".com",
-            ".bat",
-            ".cmd",
-            ".ps1",
-            ".psm1",
-            ".vbs",
-            ".vbe",
-            ".js",
-            ".jse",
-            ".wsf",
-            ".wsh",
-            ".hta",
-            ".msi",
-            ".msp",
-            ".scr",
-            ".cpl",
-            ".lnk",
-            ".url",
-            ".reg",
-            ".jar",
-            ".appref-ms",
+            ".bmp",
+            ".config",
+            ".cs",
+            ".csv",
+            ".docx",
+            ".gif",
+            ".ini",
+            ".jpeg",
+            ".jpg",
+            ".json",
+            ".markdown",
+            ".md",
+            ".pdf",
+            ".png",
+            ".pptx",
+            ".rtf",
+            ".toml",
+            ".tsv",
+            ".txt",
+            ".webp",
+            ".xlsx",
+            ".xml",
+            ".yaml",
+            ".yml",
         ],
         StringComparer.OrdinalIgnoreCase);
 
@@ -114,15 +116,33 @@ internal sealed class ToolPathPolicy
     public string NormalizeOpenableDocument(string path)
     {
         string normalized = NormalizeExistingFile(path);
-        if (ExecutableDocumentExtensions.Contains(Path.GetExtension(normalized)))
+        if (!OpenableDocumentExtensions.Contains(Path.GetExtension(normalized)))
         {
-            throw new ToolValidationException("executable_file_open_denied");
+            throw new ToolValidationException("file_type_open_denied");
         }
 
         return normalized;
     }
 
     public string NormalizeExistingDirectory(string path) => Normalize(path, expectDirectory: true);
+
+    public string NormalizeGitRepository(string path)
+    {
+        string repository = NormalizeExistingDirectory(path);
+        string metadata = Path.Combine(repository, ".git");
+        if (File.Exists(metadata))
+        {
+            throw new ToolValidationException("git_indirection_denied");
+        }
+
+        if (!Directory.Exists(metadata))
+        {
+            throw new ToolValidationException("not_git_repository");
+        }
+
+        EnsureNoReparsePoints(repository, metadata);
+        return repository;
+    }
 
     public static bool IsSensitiveEntry(string path)
     {
@@ -162,6 +182,8 @@ internal sealed class ToolPathPolicy
             throw new ToolValidationException("path_invalid");
         }
 
+        ValidateCanonicalWindowsPath(fullPath);
+
         string? containingRoot = _roots.FirstOrDefault(root => IsWithinRoot(root, fullPath));
         if (containingRoot is null)
         {
@@ -191,12 +213,30 @@ internal sealed class ToolPathPolicy
         }
 
         string fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        if (fullPath.StartsWith("\\\\", StringComparison.Ordinal))
+        {
+            throw new ToolValidationException("configured_root_not_local");
+        }
+
+        ValidateCanonicalWindowsPath(fullPath);
         string? pathRoot = Path.GetPathRoot(fullPath);
         if (pathRoot is null ||
             string.Equals(fullPath, Path.TrimEndingDirectorySeparator(pathRoot), StringComparison.OrdinalIgnoreCase) ||
             !Directory.Exists(fullPath))
         {
             throw new ToolValidationException("configured_root_invalid");
+        }
+
+        try
+        {
+            if (new DriveInfo(pathRoot).DriveType == DriveType.Network)
+            {
+                throw new ToolValidationException("configured_root_not_local");
+            }
+        }
+        catch (IOException)
+        {
+            throw new ToolValidationException("configured_root_unavailable");
         }
 
         if (ContainsSensitiveAbsoluteComponent(fullPath))
@@ -216,6 +256,60 @@ internal sealed class ToolPathPolicy
         {
             throw new ToolValidationException("path_invalid");
         }
+
+        ValidateWindowsPathSegments(path);
+    }
+
+    private static void ValidateCanonicalWindowsPath(string path)
+    {
+        string? root = Path.GetPathRoot(path);
+        if (string.IsNullOrEmpty(root))
+        {
+            throw new ToolValidationException("path_invalid");
+        }
+
+        ValidateWindowsPathSegments(path);
+    }
+
+    private static void ValidateWindowsPathSegments(string path)
+    {
+        string? root = Path.IsPathFullyQualified(path) ? Path.GetPathRoot(path) : null;
+        ReadOnlySpan<char> relative = path.AsSpan(root?.Length ?? 0);
+        if (relative.Contains(':'))
+        {
+            throw new ToolValidationException("alternate_data_stream_denied");
+        }
+
+        foreach (string segment in relative.ToString().Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment.EndsWith(' ') ||
+                segment.EndsWith('.') ||
+                LooksLikeShortNameAlias(segment))
+            {
+                throw new ToolValidationException("ambiguous_windows_path_denied");
+            }
+        }
+    }
+
+    private static bool LooksLikeShortNameAlias(string segment)
+    {
+        int tilde = segment.LastIndexOf('~');
+        if (tilde <= 0 || tilde == segment.Length - 1)
+        {
+            return false;
+        }
+
+        int index = tilde + 1;
+        bool hasDigit = false;
+        while (index < segment.Length && char.IsAsciiDigit(segment[index]))
+        {
+            hasDigit = true;
+            index++;
+        }
+
+        return hasDigit && (index == segment.Length || segment[index] == '.');
     }
 
     private static bool IsWithinRoot(string root, string candidate)

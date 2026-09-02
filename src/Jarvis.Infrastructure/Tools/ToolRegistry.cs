@@ -194,7 +194,7 @@ internal sealed class ToolRegistry : IToolCatalog
                 getGitStatus,
                 request => request with
                 {
-                    RepositoryPath = pathPolicy.NormalizeExistingDirectory(request.RepositoryPath),
+                    RepositoryPath = pathPolicy.NormalizeGitRepository(request.RepositoryPath),
                 }),
             Register(
                 "execute_safe_command",

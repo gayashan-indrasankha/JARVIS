@@ -4,6 +4,8 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Jarvis.Core.Voice;
+using Jarvis.Infrastructure.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace Jarvis.Infrastructure.Voice.Local.Llama;
 
@@ -13,6 +15,7 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
     private readonly ILlamaServerSupervisor _supervisor;
     private readonly ILoopbackHttpClientFactory _httpClientFactory;
     private readonly IVoiceMetrics _metrics;
+    private readonly TimeSpan _requestTimeout;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private HttpClient? _client;
     private LlamaServerConnection? _connection;
@@ -21,11 +24,27 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
     public LlamaCppLocalLanguageModel(
         ILlamaServerSupervisor supervisor,
         ILoopbackHttpClientFactory httpClientFactory,
-        IVoiceMetrics metrics)
+        IVoiceMetrics metrics,
+        IOptions<LocalAiOptions> options)
+        : this(
+            supervisor,
+            httpClientFactory,
+            metrics,
+            TimeSpan.FromSeconds(options.Value.GenerationTimeoutSeconds))
+    {
+    }
+
+    internal LlamaCppLocalLanguageModel(
+        ILlamaServerSupervisor supervisor,
+        ILoopbackHttpClientFactory httpClientFactory,
+        IVoiceMetrics metrics,
+        TimeSpan? requestTimeout = null)
     {
         _supervisor = supervisor;
         _httpClientFactory = httpClientFactory;
         _metrics = metrics;
+        _requestTimeout = requestTimeout ?? TimeSpan.FromMinutes(5);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_requestTimeout, TimeSpan.Zero);
     }
 
     public async ValueTask InitializeAsync(CancellationToken cancellationToken)
@@ -78,11 +97,15 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
         };
 
         Stopwatch generation = Stopwatch.StartNew();
+        using CancellationTokenSource requestCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestCancellation.CancelAfter(_requestTimeout);
+        CancellationToken requestToken = requestCancellation.Token;
         HttpResponseMessage response;
         try
         {
             response = await client
-                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, requestToken)
                 .ConfigureAwait(false);
         }
         catch (HttpRequestException)
@@ -90,6 +113,11 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
             throw new LocalComponentUnavailableException(
                 "local_llm_unavailable",
                 "The local language model stopped responding.");
+        }
+        catch (OperationCanceledException) when (
+            requestCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw CreateRequestTimeout();
         }
 
         using (response)
@@ -101,65 +129,112 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
                     "The local language model rejected the generation request.");
             }
 
-            await using Stream stream = await response.Content
-                .ReadAsStreamAsync(cancellationToken)
-                .ConfigureAwait(false);
-            using StreamReader reader = new(stream);
-            bool firstToken = true;
-            int emittedCharacters = 0;
-            await foreach (string line in ReadBoundedLinesAsync(reader, cancellationToken)
-                .ConfigureAwait(false))
+            Stream stream;
+            try
             {
-                if (!line.StartsWith("data:", StringComparison.Ordinal))
+                stream = await response.Content
+                    .ReadAsStreamAsync(requestToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (
+                requestCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                throw CreateRequestTimeout();
+            }
+            catch (Exception exception) when (exception is HttpRequestException or IOException)
+            {
+                throw new LocalComponentUnavailableException(
+                    "local_llm_stream_interrupted",
+                    "The local language model connection ended before the response completed.");
+            }
+
+            await using (stream)
+            {
+                using StreamReader reader = new(stream);
+                bool firstToken = true;
+                bool streamCompleted = false;
+                int emittedCharacters = 0;
+                await foreach (string line in ReadBoundedLinesAsync(
+                    reader,
+                    requestToken,
+                    cancellationToken)
+                    .ConfigureAwait(false))
                 {
-                    continue;
+                    if (!line.StartsWith("data:", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    string data = line[5..].TrimStart();
+                    if (string.Equals(data, "[DONE]", StringComparison.Ordinal))
+                    {
+                        streamCompleted = true;
+                        break;
+                    }
+
+                    string? content = ParseVisibleContent(data);
+                    if (string.IsNullOrEmpty(content))
+                    {
+                        TryRecordServerTimings(data);
+                        continue;
+                    }
+
+                    emittedCharacters = checked(emittedCharacters + content.Length);
+                    if (emittedCharacters > VoiceDataLimits.MaximumTextCharacters)
+                    {
+                        throw new InvalidDataException("The local language model response exceeded its size limit.");
+                    }
+
+                    if (firstToken)
+                    {
+                        firstToken = false;
+                        _metrics.Record(new VoiceMetric(
+                            VoiceMetricKind.FirstToken,
+                            generation.Elapsed.TotalMilliseconds));
+                        _metrics.Record(new VoiceMetric(
+                            VoiceMetricKind.WarmLanguageModelFirstToken,
+                            generation.Elapsed.TotalMilliseconds));
+                    }
+
+                    yield return new LanguageModelToken(content);
                 }
 
-                string data = line[5..].TrimStart();
-                if (string.Equals(data, "[DONE]", StringComparison.Ordinal))
+                if (!streamCompleted)
                 {
-                    break;
+                    throw new LocalComponentUnavailableException(
+                        "local_llm_stream_incomplete",
+                        "The local language model connection ended before the response completed.");
                 }
-
-                string? content = ParseVisibleContent(data);
-                if (string.IsNullOrEmpty(content))
-                {
-                    TryRecordServerTimings(data);
-                    continue;
-                }
-
-                emittedCharacters = checked(emittedCharacters + content.Length);
-                if (emittedCharacters > VoiceDataLimits.MaximumTextCharacters)
-                {
-                    throw new InvalidDataException("The local language model response exceeded its size limit.");
-                }
-
-                if (firstToken)
-                {
-                    firstToken = false;
-                    _metrics.Record(new VoiceMetric(
-                        VoiceMetricKind.FirstToken,
-                        generation.Elapsed.TotalMilliseconds));
-                    _metrics.Record(new VoiceMetric(
-                        VoiceMetricKind.WarmLanguageModelFirstToken,
-                        generation.Elapsed.TotalMilliseconds));
-                }
-
-                yield return new LanguageModelToken(content);
             }
         }
     }
 
     private static async IAsyncEnumerable<string> ReadBoundedLinesAsync(
         StreamReader reader,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        CancellationToken requestToken,
+        [EnumeratorCancellation] CancellationToken callerToken)
     {
         char[] buffer = new char[4 * 1024];
         System.Text.StringBuilder line = new();
         while (true)
         {
-            int read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)
-                .ConfigureAwait(false);
+            int read;
+            try
+            {
+                read = await reader.ReadAsync(buffer.AsMemory(), requestToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (
+                requestToken.IsCancellationRequested && !callerToken.IsCancellationRequested)
+            {
+                throw CreateRequestTimeout();
+            }
+            catch (Exception exception) when (exception is HttpRequestException or IOException)
+            {
+                throw new LocalComponentUnavailableException(
+                    "local_llm_stream_interrupted",
+                    "The local language model connection ended before the response completed.");
+            }
             if (read == 0)
             {
                 if (line.Length > 0)
@@ -189,6 +264,11 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
             }
         }
     }
+
+    private static LocalComponentUnavailableException CreateRequestTimeout() =>
+        new(
+            "local_llm_request_timeout",
+            "The local language model did not complete before the configured deadline.");
 
     public async ValueTask DisposeAsync()
     {
