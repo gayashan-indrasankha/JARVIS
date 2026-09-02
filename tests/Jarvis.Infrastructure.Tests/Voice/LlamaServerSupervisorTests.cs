@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Jarvis.Core.ProjectLearning;
 using Jarvis.Core.Voice;
 using Jarvis.Infrastructure.Configuration;
 using Jarvis.Infrastructure.Voice.Local;
@@ -209,18 +210,51 @@ public sealed class LlamaServerSupervisorTests
         Assert.True(Assert.Single(processes.Processes).WasKilled);
     }
 
+    [Fact]
+    public async Task ProfileSwitchStopsFastAndStartsConfiguredDeepModelOnce()
+    {
+        using TemporaryAssets temporary = new(includeModel: true, includeDeepModel: true);
+        FakeProcessFactory processes = new(initialExitStates: [false, false]);
+        await using LlamaServerSupervisor supervisor = CreateSupervisor(
+            temporary,
+            processes,
+            new FakeHealthProbe(isReady: true),
+            deepEnabled: true);
+        _ = await supervisor.SelectProfileAsync(ModelProfile.Fast, CancellationToken.None);
+
+        LlamaServerConnection deep = await supervisor.SelectProfileAsync(
+            ModelProfile.Deep,
+            CancellationToken.None);
+        LlamaServerConnection reused = await supervisor.SelectProfileAsync(
+            ModelProfile.Deep,
+            CancellationToken.None);
+
+        Assert.Equal(ModelProfile.Deep, deep.Profile);
+        Assert.Equal(deep, reused);
+        Assert.Equal(2, processes.Starts.Count);
+        Assert.True(processes.Processes[0].WasKilled);
+        ProcessStartInfo start = processes.Starts[1];
+        Assert.EndsWith("Qwen3-8B-Q4_K_M.gguf", ValueAfter(start, "--model"), StringComparison.Ordinal);
+        Assert.Equal("6144", ValueAfter(start, "--ctx-size"));
+        Assert.Equal("16", ValueAfter(start, "--n-gpu-layers"));
+        Assert.Equal("8", ValueAfter(start, "--threads"));
+        Assert.Equal("127.0.0.1", ValueAfter(start, "--host"));
+    }
+
     private static LlamaServerSupervisor CreateSupervisor(
         TemporaryAssets temporary,
         FakeProcessFactory processes,
         ILlamaServerHealthProbe healthProbe,
         int contextSize = 8192,
         int startupTimeoutSeconds = 5,
-        TimeSpan? shutdownTimeout = null) =>
+        TimeSpan? shutdownTimeout = null,
+        bool deepEnabled = false) =>
         new(
             Options.Create(new LocalAiOptions
             {
                 ContextSize = contextSize,
                 StartupTimeoutSeconds = startupTimeoutSeconds,
+                Deep = new DeepModelOptions { Enabled = deepEnabled },
             }),
             new LocalAssetPaths(temporary.Paths),
             processes,
@@ -334,7 +368,7 @@ public sealed class LlamaServerSupervisorTests
 
     private sealed class TemporaryAssets : IDisposable
     {
-        public TemporaryAssets(bool includeModel)
+        public TemporaryAssets(bool includeModel, bool includeDeepModel = false)
         {
             string home = Path.Combine(
                 Path.GetTempPath(),
@@ -349,6 +383,13 @@ public sealed class LlamaServerSupervisorTests
             {
                 File.WriteAllBytes(
                     Path.Combine(Paths.LlmModels, "Qwen3-4B-Q4_K_M.gguf"),
+                    [0]);
+            }
+
+            if (includeDeepModel)
+            {
+                File.WriteAllBytes(
+                    Path.Combine(Paths.LlmModels, "Qwen3-8B-Q4_K_M.gguf"),
                     [0]);
             }
         }

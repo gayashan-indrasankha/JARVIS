@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using Jarvis.Core.ProjectLearning;
 using Jarvis.Core.Voice;
 using Jarvis.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,17 @@ namespace Jarvis.Infrastructure.Voice.Local.Llama;
 internal sealed record LlamaServerConnection(
     Uri Endpoint,
     string? AuthenticationToken,
-    int ContextSize);
+    int ContextSize,
+    ModelProfile Profile = ModelProfile.Fast,
+    string ModelId = LocalAssetPaths.SupportedLanguageModelId);
+
+internal sealed record LlamaRuntimeProfile(
+    ModelProfile Profile,
+    string ModelId,
+    string ModelPath,
+    int ContextSize,
+    int GpuLayers,
+    int Threads);
 
 internal interface ILlamaServerHealthProbe
 {
@@ -70,6 +81,16 @@ internal sealed class LlamaServerHealthProbe : ILlamaServerHealthProbe
 internal interface ILlamaServerSupervisor : IAsyncDisposable
 {
     public ValueTask<LlamaServerConnection> EnsureReadyAsync(CancellationToken cancellationToken);
+
+    public ValueTask<LlamaServerConnection> SelectProfileAsync(
+        ModelProfile profile,
+        CancellationToken cancellationToken) =>
+        profile == ModelProfile.Fast
+            ? EnsureReadyAsync(cancellationToken)
+            : ValueTask.FromException<LlamaServerConnection>(
+                new LocalComponentUnavailableException(
+                    "deep_profile_unavailable",
+                    "The optional Deep model profile is unavailable."));
 }
 
 internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
@@ -88,6 +109,7 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
     private Task? _monitorTask;
     private LlamaServerConnection? _connection;
     private string _lastDiagnosticCode = "none";
+    private ModelProfile _selectedProfile = ModelProfile.Fast;
     private bool _stopping;
     private bool _disposed;
 
@@ -127,9 +149,19 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
     }
 
     public async ValueTask<LlamaServerConnection> EnsureReadyAsync(
+        CancellationToken cancellationToken) =>
+        await SelectProfileAsync(_selectedProfile, cancellationToken).ConfigureAwait(false);
+
+    public async ValueTask<LlamaServerConnection> SelectProfileAsync(
+        ModelProfile profile,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!Enum.IsDefined(profile))
+        {
+            throw new ArgumentOutOfRangeException(nameof(profile));
+        }
+
         if (!_options.Enabled)
         {
             throw new LocalComponentUnavailableException(
@@ -140,17 +172,39 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            LlamaRuntimeProfile runtimeProfile = GetRuntimeProfile(profile);
             if (_connection is not null &&
+                _connection.Profile == profile &&
                 (_options.RuntimeMode == LocalAiRuntimeMode.External ||
                     _process is { HasExited: false }))
             {
+                _selectedProfile = profile;
                 return _connection;
             }
+
+            if (_connection is not null && _connection.Profile != profile)
+            {
+                await StopProcessAsync().ConfigureAwait(false);
+            }
+
+            _selectedProfile = profile;
 
             Uri endpoint = LoopbackEndpoint.Create(_options.Host, _options.Port);
             if (_options.RuntimeMode == LocalAiRuntimeMode.External)
             {
-                LlamaServerConnection external = new(endpoint, null, _options.ContextSize);
+                if (profile != ModelProfile.Fast)
+                {
+                    throw new LocalComponentUnavailableException(
+                        "deep_profile_external_unsupported",
+                        "The optional Deep profile requires the managed local runtime.");
+                }
+
+                LlamaServerConnection external = new(
+                    endpoint,
+                    null,
+                    runtimeProfile.ContextSize,
+                    profile,
+                    runtimeProfile.ModelId);
                 if (!await _healthProbe.IsReadyAsync(external, cancellationToken).ConfigureAwait(false))
                 {
                     throw new LocalComponentUnavailableException(
@@ -163,17 +217,19 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
                 return external;
             }
 
-            ValidateManagedAssets();
-            int[] contexts = _options.ContextSize > FallbackContextSize
-                ? [_options.ContextSize, FallbackContextSize]
-                : [_options.ContextSize];
+            ValidateManagedAssets(runtimeProfile);
+            int[] contexts = runtimeProfile.ContextSize > FallbackContextSize
+                ? [runtimeProfile.ContextSize, FallbackContextSize]
+                : [runtimeProfile.ContextSize];
 
             foreach (int contextSize in contexts)
             {
                 LlamaServerConnection connection = new(
                     endpoint,
                     CreateAuthenticationToken(),
-                    contextSize);
+                    contextSize,
+                    profile,
+                    runtimeProfile.ModelId);
                 await StopProcessAsync().ConfigureAwait(false);
                 _lastDiagnosticCode = "none";
                 ProcessStartInfo startInfo = CreateStartInfo(connection);
@@ -184,8 +240,8 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
                     _logger,
                     endpoint.Port,
                     contextSize,
-                    _options.GpuLayers,
-                    _options.Threads);
+                    runtimeProfile.GpuLayers,
+                    runtimeProfile.Threads);
 
                 if (await WaitUntilReadyAsync(connection, cancellationToken).ConfigureAwait(false))
                 {
@@ -242,6 +298,7 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
 
     internal ProcessStartInfo CreateStartInfo(LlamaServerConnection connection)
     {
+        LlamaRuntimeProfile profile = GetRuntimeProfile(connection.Profile);
         ProcessStartInfo startInfo = new()
         {
             FileName = _assets.LlamaServerExecutable,
@@ -251,13 +308,13 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
             RedirectStandardError = true,
             RedirectStandardOutput = true,
         };
-        AddArgument("--model", _assets.LanguageModel);
-        AddArgument("--alias", LocalAssetPaths.SupportedLanguageModelId);
+        AddArgument("--model", profile.ModelPath);
+        AddArgument("--alias", profile.ModelId);
         AddArgument("--host", "127.0.0.1");
         AddArgument("--port", connection.Endpoint.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AddArgument("--ctx-size", connection.ContextSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        AddArgument("--n-gpu-layers", _options.GpuLayers.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        AddArgument("--threads", _options.Threads.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddArgument("--n-gpu-layers", profile.GpuLayers.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddArgument("--threads", profile.Threads.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AddArgument("--parallel", "1");
         AddArgument("--reasoning", "off");
         AddArgument("--reasoning-format", "deepseek");
@@ -301,12 +358,16 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
         startInfo.Environment["WINDIR"] = windowsDirectory;
     }
 
-    private void ValidateManagedAssets()
+    private void ValidateManagedAssets(LlamaRuntimeProfile profile)
     {
-        if (!string.Equals(
-            _options.ModelId,
-            LocalAssetPaths.SupportedLanguageModelId,
-            StringComparison.Ordinal))
+        if ((profile.Profile == ModelProfile.Fast && !string.Equals(
+                    profile.ModelId,
+                    LocalAssetPaths.SupportedLanguageModelId,
+                    StringComparison.Ordinal)) ||
+            (profile.Profile == ModelProfile.Deep && !string.Equals(
+                    profile.ModelId,
+                    LocalAssetPaths.SupportedDeepLanguageModelId,
+                    StringComparison.Ordinal)))
         {
             throw new LocalComponentUnavailableException(
                 "local_llm_model_unsupported",
@@ -318,11 +379,35 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
             throw LocalAssetPaths.Missing("llama_runtime");
         }
 
-        if (!File.Exists(_assets.LanguageModel))
+        if (!File.Exists(profile.ModelPath))
         {
-            throw LocalAssetPaths.Missing("language_model");
+            throw LocalAssetPaths.Missing(
+                profile.Profile == ModelProfile.Deep ? "deep_language_model" : "language_model");
         }
     }
+
+    private LlamaRuntimeProfile GetRuntimeProfile(ModelProfile profile) =>
+        profile switch
+        {
+            ModelProfile.Fast => new LlamaRuntimeProfile(
+                profile,
+                _options.ModelId,
+                _assets.LanguageModel,
+                _options.ContextSize,
+                _options.GpuLayers,
+                _options.Threads),
+            ModelProfile.Deep when _options.Deep.Enabled => new LlamaRuntimeProfile(
+                profile,
+                _options.Deep.ModelId,
+                _assets.DeepLanguageModel,
+                _options.Deep.ContextSize,
+                _options.Deep.GpuLayers,
+                _options.Deep.Threads),
+            ModelProfile.Deep => throw new LocalComponentUnavailableException(
+                "deep_profile_disabled",
+                "The optional Deep model profile is not enabled; JARVIS will use the Fast profile."),
+            _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+        };
 
     private async ValueTask<bool> WaitUntilReadyAsync(
         LlamaServerConnection connection,

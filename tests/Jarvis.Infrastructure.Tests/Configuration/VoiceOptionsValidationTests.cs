@@ -18,6 +18,8 @@ public sealed class VoiceOptionsValidationTests
         ToolOptions tools = provider.GetRequiredService<IOptions<ToolOptions>>().Value;
         ProjectIntelligenceOptions projects = provider
             .GetRequiredService<IOptions<ProjectIntelligenceOptions>>().Value;
+        ProjectLearningOptions learning = provider
+            .GetRequiredService<IOptions<ProjectLearningOptions>>().Value;
 
         Assert.True(localAi.Enabled);
         Assert.Equal("127.0.0.1", localAi.Host);
@@ -28,6 +30,9 @@ public sealed class VoiceOptionsValidationTests
         Assert.Empty(tools.AllowedRoots);
         Assert.True(projects.Enabled);
         Assert.Equal(8_192, projects.MaximumContextCharacters);
+        Assert.True(learning.Enabled);
+        Assert.True(learning.PersistSessions);
+        Assert.False(localAi.Deep.Enabled);
     }
 
     [Theory]
@@ -58,6 +63,8 @@ public sealed class VoiceOptionsValidationTests
     [InlineData("LocalAi:ContextSize", "2048")]
     [InlineData("LocalAi:Threads", "0")]
     [InlineData("LocalAi:GenerationTimeoutSeconds", "0")]
+    [InlineData("LocalAi:Deep:ContextSize", "2048")]
+    [InlineData("LocalAi:Deep:MinimumAvailableMemoryBytes", "1")]
     [InlineData("Tools:MaximumToolSteps", "9")]
     [InlineData("Tools:MaximumResultCharacters", "100")]
     [InlineData("Tools:DefaultTimeoutSeconds", "0")]
@@ -67,6 +74,10 @@ public sealed class VoiceOptionsValidationTests
     [InlineData("ProjectIntelligence:MaximumContextCharacters", "100")]
     [InlineData("ProjectIntelligence:WatchDebounceMilliseconds", "10")]
     [InlineData("ProjectIntelligence:IndexTimeoutSeconds", "121")]
+    [InlineData("ProjectLearning:MaximumEvidenceItems", "0")]
+    [InlineData("ProjectLearning:MinimumInterviewQuestions", "0")]
+    [InlineData("ProjectLearning:MaximumInterviewQuestions", "21")]
+    [InlineData("ProjectLearning:OperationTimeoutSeconds", "121")]
     [InlineData("Jarvis:InstanceName", "unsafe instance\nname")]
     public void InvalidResourceConfigurationFailsValidation(string key, string value)
     {
@@ -90,6 +101,10 @@ public sealed class VoiceOptionsValidationTests
             else if (key.StartsWith("ProjectIntelligence:", StringComparison.Ordinal))
             {
                 _ = provider.GetRequiredService<IOptions<ProjectIntelligenceOptions>>().Value;
+            }
+            else if (key.StartsWith("ProjectLearning:", StringComparison.Ordinal))
+            {
+                _ = provider.GetRequiredService<IOptions<ProjectLearningOptions>>().Value;
             }
             else
             {

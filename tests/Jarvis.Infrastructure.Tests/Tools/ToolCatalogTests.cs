@@ -27,6 +27,8 @@ public sealed class ToolCatalogTests
         Assert.Equal(
             [
                 "analyze_project",
+                "continue_tutor_session",
+                "end_learning_session",
                 "execute_safe_command",
                 "explain_architecture",
                 "explain_symbol",
@@ -46,6 +48,10 @@ public sealed class ToolCatalogTests
                 "open_folder",
                 "read_text_file",
                 "search_project",
+                "start_interview_session",
+                "start_revision_session",
+                "start_tutor_session",
+                "submit_interview_answer",
                 "trace_dependency",
                 "trace_request_flow",
             ],
@@ -71,6 +77,46 @@ public sealed class ToolCatalogTests
             static definition => Assert.Equal(
                 ToolAuthorizationCategory.SafeRead,
                 definition.AuthorizationCategory));
+        Assert.All(
+            catalog.Definitions.Where(static definition => definition.Name is
+                "start_tutor_session" or "continue_tutor_session" or
+                "start_interview_session" or "submit_interview_answer" or
+                "end_learning_session" or "start_revision_session"),
+            static definition => Assert.Equal(
+                ToolAuthorizationCategory.SafeLocalAction,
+                definition.AuthorizationCategory));
+    }
+
+    [Fact]
+    public void LearningSchemasRejectUnknownMembersEmptySessionsAndOutOfRangeQuestions()
+    {
+        using TemporaryDirectory temporary = new();
+        Directory.CreateDirectory(Path.Combine(temporary.Path, ".git"));
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Tools:AllowedRoots:0"] = temporary.Path,
+            })
+            .Build();
+        ServiceCollection services = new();
+        services.AddJarvisInfrastructure(configuration);
+        using ServiceProvider provider = services.BuildServiceProvider();
+        ToolRegistry registry = provider.GetRequiredService<ToolRegistry>();
+        Assert.True(registry.TryGet("start_interview_session", out IRegisteredTool? start));
+        Assert.True(registry.TryGet("end_learning_session", out IRegisteredTool? end));
+
+        ToolValidationException unknown = Assert.Throws<ToolValidationException>(() =>
+            start!.ValidateAndNormalize(
+                $$"""{"repositoryPath":"{{Escape(temporary.Path)}}","extra":true}"""));
+        ToolValidationException count = Assert.Throws<ToolValidationException>(() =>
+            start!.ValidateAndNormalize(
+                $$"""{"repositoryPath":"{{Escape(temporary.Path)}}","questionCount":4}"""));
+        ToolValidationException empty = Assert.Throws<ToolValidationException>(() =>
+            end!.ValidateAndNormalize("""{"sessionId":"00000000-0000-0000-0000-000000000000"}"""));
+
+        Assert.Equal("malformed_arguments_json", unknown.Code);
+        Assert.Equal("interview_question_count_invalid", count.Code);
+        Assert.Equal("learning_session_id_invalid", empty.Code);
     }
 
     [Fact]

@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Jarvis.Core.ProjectLearning;
 using Jarvis.Core.Tools;
 using Jarvis.Infrastructure.Configuration;
 using Jarvis.Infrastructure.ProjectIntelligence;
+using Jarvis.Infrastructure.ProjectLearning;
 using Microsoft.Extensions.Options;
 
 namespace Jarvis.Infrastructure.Tools;
@@ -91,8 +93,11 @@ internal sealed class ToolRegistry : IToolCatalog
         IToolExecutor<GetGitStatusRequest, GetGitStatusResponse> getGitStatus,
         IToolExecutor<ExecuteSafeCommandRequest, ExecuteSafeCommandResponse> executeSafeCommand,
         IOptions<ProjectIntelligenceOptions> projectOptions,
-        ProjectToolExecutors projectTools)
+        ProjectToolExecutors projectTools,
+        IOptions<ProjectLearningOptions> learningOptions,
+        ProjectLearningToolExecutors learningTools)
     {
+        ProjectLearningOptions learningSettings = learningOptions.Value;
         int resultLimit = Math.Min(
             options.Value.MaximumResultCharacters,
             ToolDataLimits.MaximumObservationCharacters);
@@ -100,7 +105,8 @@ internal sealed class ToolRegistry : IToolCatalog
         TimeSpan actionTimeout = TimeSpan.FromSeconds(options.Value.DefaultTimeoutSeconds);
         TimeSpan projectIndexTimeout = TimeSpan.FromSeconds(projectOptions.Value.IndexTimeoutSeconds);
         TimeSpan projectQueryTimeout = TimeSpan.FromSeconds(projectOptions.Value.QueryTimeoutSeconds);
-        IRegisteredTool[] tools =
+        TimeSpan learningTimeout = TimeSpan.FromSeconds(learningSettings.OperationTimeoutSeconds);
+        List<IRegisteredTool> tools =
         [
             Register(
                 "list_directory",
@@ -335,6 +341,88 @@ internal sealed class ToolRegistry : IToolCatalog
                 request => request with { RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath) }),
         ];
 
+        if (learningSettings.Enabled)
+        {
+            tools.AddRange(
+            [
+                Register(
+                    "start_tutor_session",
+                    "Start a persisted, evidence-grounded local project tutoring session. Use FAST by default; DEEP may safely fall back to FAST.",
+                    ProjectLearningToolSchemas.StartTutor,
+                    ToolAuthorizationCategory.SafeLocalAction,
+                    learningTimeout,
+                    (IToolExecutor<StartTutorSessionRequest, ProjectLearningResponse>)learningTools,
+                    request => request with
+                    {
+                        RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                        Topic = ValidateLearningText(request.Topic, ProjectLearningLimits.MaximumTopicCharacters, "learning_topic_invalid"),
+                        Level = ValidateEnum(request.Level, "tutor_level_invalid"),
+                        Profile = ValidateEnum(request.Profile, "model_profile_invalid"),
+                    }),
+                Register(
+                    "continue_tutor_session",
+                    "Continue an active tutor session with deeper explanation, active recall, self-explanation, evidence, or recap.",
+                    ProjectLearningToolSchemas.ContinueTutor,
+                    ToolAuthorizationCategory.SafeLocalAction,
+                    learningTimeout,
+                    (IToolExecutor<ContinueTutorSessionRequest, ProjectLearningResponse>)learningTools,
+                    request => request with
+                    {
+                        SessionId = ValidateSessionId(request.SessionId),
+                        Interaction = ValidateEnum(request.Interaction, "tutor_interaction_invalid"),
+                        UserInput = ValidateLearningText(request.UserInput, ProjectLearningLimits.MaximumAnswerCharacters, "learning_input_invalid"),
+                    }),
+                Register(
+                    "start_interview_session",
+                    "Start a persisted adaptive mock interview grounded in the analyzed local repository.",
+                    ProjectLearningToolSchemas.StartInterview,
+                    ToolAuthorizationCategory.SafeLocalAction,
+                    learningTimeout,
+                    (IToolExecutor<StartInterviewSessionRequest, ProjectLearningResponse>)learningTools,
+                    request => request with
+                    {
+                        RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                        Difficulty = ValidateEnum(request.Difficulty, "interview_difficulty_invalid"),
+                        QuestionCount = ValidateInterviewQuestionCount(
+                            request.QuestionCount,
+                            learningSettings),
+                        Profile = ValidateEnum(request.Profile, "model_profile_invalid"),
+                    }),
+                Register(
+                    "submit_interview_answer",
+                    "Submit one answer to the active adaptive interview and receive grounded scoring, correction, and the next question.",
+                    ProjectLearningToolSchemas.SubmitAnswer,
+                    ToolAuthorizationCategory.SafeLocalAction,
+                    learningTimeout,
+                    (IToolExecutor<SubmitInterviewAnswerRequest, ProjectLearningResponse>)learningTools,
+                    request => request with
+                    {
+                        SessionId = ValidateSessionId(request.SessionId),
+                        Answer = ValidateLearningText(request.Answer, ProjectLearningLimits.MaximumAnswerCharacters, "interview_answer_invalid"),
+                    }),
+                Register(
+                    "end_learning_session",
+                    "End an active tutor or interview session and return its structured learning report.",
+                    ProjectLearningToolSchemas.EndSession,
+                    ToolAuthorizationCategory.SafeLocalAction,
+                    learningTimeout,
+                    (IToolExecutor<EndLearningSessionRequest, ProjectLearningResponse>)learningTools,
+                    request => request with { SessionId = ValidateSessionId(request.SessionId) }),
+                Register(
+                    "start_revision_session",
+                    "Start a new evidence-grounded tutor session from the latest completed interview weaknesses for this repository.",
+                    ProjectLearningToolSchemas.StartRevision,
+                    ToolAuthorizationCategory.SafeLocalAction,
+                    learningTimeout,
+                    (IToolExecutor<StartRevisionSessionRequest, ProjectLearningResponse>)learningTools,
+                    request => request with
+                    {
+                        RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                        Profile = ValidateEnum(request.Profile, "model_profile_invalid"),
+                    }),
+            ]);
+        }
+
         _registrations = tools.ToDictionary(
             static tool => tool.Definition.Name,
             StringComparer.Ordinal);
@@ -437,5 +525,42 @@ internal sealed class ToolRegistry : IToolCatalog
         }
 
         return value.Trim();
+    }
+
+    private static string ValidateLearningText(string value, int maximumLength, string code) =>
+        ValidateProjectText(value, maximumLength, code);
+
+    private static Guid ValidateSessionId(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            throw new ToolValidationException("learning_session_id_invalid");
+        }
+
+        return sessionId;
+    }
+
+    private static T ValidateEnum<T>(T value, string code)
+        where T : struct, Enum
+    {
+        if (!Enum.IsDefined(value))
+        {
+            throw new ToolValidationException(code);
+        }
+
+        return value;
+    }
+
+    private static int ValidateInterviewQuestionCount(
+        int questionCount,
+        ProjectLearningOptions options)
+    {
+        if (questionCount < options.MinimumInterviewQuestions ||
+            questionCount > options.MaximumInterviewQuestions)
+        {
+            throw new ToolValidationException("interview_question_count_invalid");
+        }
+
+        return questionCount;
     }
 }

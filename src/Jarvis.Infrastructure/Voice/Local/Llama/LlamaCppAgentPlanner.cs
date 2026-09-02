@@ -111,7 +111,7 @@ internal sealed class LlamaCppAgentPlanner : IAgentPlanner
         await InitializeAsync(cancellationToken).ConfigureAwait(false);
         HttpClient client = _client ?? throw new InvalidOperationException(
             "The local planner client was not initialized.");
-        PlannerChatRequest payload = CreateRequest(request, repairAttempt);
+        PlannerChatRequest payload = CreateRequest(request, repairAttempt, _connection!.ModelId);
         using HttpRequestMessage message = new(HttpMethod.Post, "v1/chat/completions")
         {
             Content = JsonContent.Create(payload),
@@ -178,7 +178,8 @@ internal sealed class LlamaCppAgentPlanner : IAgentPlanner
 
     private static PlannerChatRequest CreateRequest(
         AgentPlanningRequest request,
-        bool repairAttempt)
+        bool repairAttempt,
+        string modelId)
     {
         string roots = request.ApprovedRoots.Count == 0
             ? "No filesystem roots are approved. Do not request a path tool."
@@ -208,7 +209,7 @@ internal sealed class LlamaCppAgentPlanner : IAgentPlanner
         ];
         JsonElement schema = BuildPlanSchema(request.Tools);
         return new PlannerChatRequest(
-            LocalAssetPaths.SupportedLanguageModelId,
+            modelId,
             messages,
             MaximumTokens: 256,
             Stream: false,

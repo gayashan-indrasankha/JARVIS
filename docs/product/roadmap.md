@@ -49,7 +49,7 @@ Exit requires the automated gates plus the wake-word matrix on target hardware. 
 
 The originally planned harmless-kernel and Windows-adapter milestones are combined for the required acceptance demonstrations; [ADR 0004](../decisions/0004-permission-controlled-local-tool-kernel.md) records the constrained boundary. Exit requires automated gates plus the [manual tool smoke test](../testing/manual-tool-smoke-test.md). Real window opening and local-model selection remain manual until executed on the target desktop.
 
-## 0.3 — Fully local Project Intelligence (current)
+## 0.3 — Fully local Project Intelligence (complete)
 
 - approved-root direct Git repository, `.sln`/`.slnx`, `.csproj`, source, and test discovery;
 - static non-evaluating project metadata loading plus an in-memory Roslyn workspace;
@@ -61,20 +61,31 @@ The originally planned harmless-kernel and Windows-adapter milestones are combin
 
 [ADR 0005](../decisions/0005-local-project-intelligence-index.md) records why Project Intelligence moved ahead of controlled mutation and why `MSBuildWorkspace` is not used for untrusted repositories. Exit requires automated gates plus the [manual Project Intelligence smoke test](../testing/manual-project-intelligence-smoke-test.md) with an installed local model and a disposable real repository.
 
-## 0.4 — Approval surface and controlled mutation
+## 0.4 — Fully local Project Tutor and Mock Interviewer (current)
+
+- progressive evidence-grounded tutoring with Socratic, active-recall, self-explanation, recap, and revision interactions;
+- adaptive project-specific interviews at Internship, Junior, and Mid-Level Stretch difficulty;
+- deterministic ten-dimension rubric scoring, retained evidence/concepts/transcript/strengths/gaps, and structured session reports;
+- persisted bounded local sessions with “teach my weaknesses” handoff;
+- required FAST Qwen3-4B plus optional session-level Qwen3-8B DEEP profile with memory gating and graceful FAST fallback;
+- complete text/local-voice path through the existing typed tool, authorization, and audit boundary.
+
+[ADR 0006](../decisions/0006-project-learning-and-optional-deep-profile.md) records the user-requested resequencing and one-model session-level profile choice. Exit requires automated gates plus the [manual Project Learning smoke test](../testing/manual-project-learning-smoke-test.md). Physical model fit, learning quality, voice continuity, latency, and disconnected operation remain manual until executed.
+
+## 0.5 — Approval surface and controlled mutation
 
 - explicit and strong confirmation UI with exact-request grants and expiry;
 - durable tamper-resistant audit storage, review, retention, and privacy controls;
 - carefully scoped file writes/changes and additional process/application actions with preview/rollback where practical;
 - no general administrator shell; destructive capabilities require separate decisions and safe test strategies.
 
-## 0.5 — Tutor/interviewer and deeper Project Intelligence
+## 0.6 — Deeper Project Intelligence
 
 - grounded technical tutoring and project-specific interview generation/evaluation;
 - richer cross-project flow analysis and measured local retrieval/answer quality;
 - optional local semantic retrieval only after a concrete benchmark justifies embeddings.
 
-## 0.6 — Memory, desktop understanding, and proactive events
+## 0.7 — Memory, desktop understanding, and proactive events
 
 - explicit memory categories, provenance, retention, correction, and deletion;
 - consent-based screen/window understanding and Windows UI automation;
