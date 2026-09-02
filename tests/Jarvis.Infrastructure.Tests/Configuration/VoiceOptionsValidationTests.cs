@@ -53,6 +53,7 @@ public sealed class VoiceOptionsValidationTests
     [InlineData("Voice:WakeWord:ContinuationWindowSeconds", "1")]
     [InlineData("LocalAi:ContextSize", "2048")]
     [InlineData("LocalAi:Threads", "0")]
+    [InlineData("LocalAi:GenerationTimeoutSeconds", "0")]
     [InlineData("Tools:MaximumToolSteps", "9")]
     [InlineData("Tools:MaximumResultCharacters", "100")]
     [InlineData("Tools:DefaultTimeoutSeconds", "0")]
@@ -98,6 +99,19 @@ public sealed class VoiceOptionsValidationTests
             () => provider.GetRequiredService<IOptions<VoiceOptions>>().Value);
 
         Assert.Contains("Voice must be enabled", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ToolRootsRejectNetworkShares()
+    {
+        using ServiceProvider provider = BuildProvider(
+            new Dictionary<string, string?>
+            {
+                ["Tools:AllowedRoots:0"] = "\\\\server\\share\\folder",
+            });
+
+        Assert.Throws<OptionsValidationException>(
+            () => provider.GetRequiredService<IOptions<ToolOptions>>().Value);
     }
 
     private static ServiceProvider BuildProvider(

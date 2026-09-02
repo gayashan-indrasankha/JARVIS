@@ -8,6 +8,60 @@ namespace Jarvis.Infrastructure.Tests.Tools;
 public sealed class InitialToolExecutorTests
 {
     [Fact]
+    public void SafeExecutableResolutionIgnoresRelativeSearchEntries()
+    {
+        using TemporaryDirectory temporary = new();
+        string executable = Path.Combine(temporary.Path, "git.exe");
+        File.WriteAllBytes(executable, [0]);
+        SafeExecutableResolver resolver = new(
+            string.Join(Path.PathSeparator, ".", temporary.Path));
+
+        string resolved = resolver.Resolve(SafeExecutableId.Git);
+
+        Assert.Equal(executable, resolved, ignoreCase: true);
+    }
+
+    [Fact]
+    public void SafeExecutableResolutionRejectsUncSearchEntriesWithoutAccessingThem()
+    {
+        SafeExecutableResolver resolver = new("\\\\untrusted-server\\share");
+
+        ToolValidationException exception = Assert.Throws<ToolValidationException>(
+            () => resolver.Resolve(SafeExecutableId.Git));
+
+        Assert.Equal("safe_executable_unavailable", exception.Code);
+    }
+
+    [Fact]
+    public async Task BoundedProcessRunnerRejectsSearchPathExecutableNames()
+    {
+        BoundedProcessRunner runner = new();
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await runner.RunAsync(
+                new BoundedProcessRequest("git", ["--version"]),
+                CancellationToken.None));
+
+        Assert.Contains("direct path", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FixedDotnetDiagnosticRunsThroughResolvedDirectPath()
+    {
+        ExecuteSafeCommandTool tool = new(
+            new SafeExecutableResolver(),
+            new BoundedProcessRunner());
+
+        ExecuteSafeCommandResponse response = await tool.ExecuteAsync(
+            new ExecuteSafeCommandRequest(SafeCommandId.DotnetVersion),
+            CancellationToken.None);
+
+        Assert.Equal("dotnet_version", response.Command);
+        Assert.Equal(0, response.ExitCode);
+        Assert.False(string.IsNullOrWhiteSpace(response.Output));
+    }
+
+    [Fact]
     public async Task FindReadAndMetadataOperateOnlyWithinTemporaryApprovedRoot()
     {
         using TemporaryDirectory temporary = new();
@@ -60,7 +114,7 @@ public sealed class InitialToolExecutorTests
     }
 
     [Fact]
-    public async Task GitStatusUsesFixedBuiltinCommandAndDisablesConfigDrivenFsMonitor()
+    public async Task GitStatusPinsRepositoryAndDisablesConfigDrivenFsMonitor()
     {
         using TemporaryDirectory temporary = new();
         Directory.CreateDirectory(Path.Combine(temporary.Path, ".git"));
@@ -70,15 +124,27 @@ public sealed class InitialToolExecutorTests
             "## main...origin/main\n M README.md\n?? notes.txt\n",
             string.Empty,
             false));
+        RecordingExecutableResolver executables = new();
 
-        GetGitStatusResponse response = await new GetGitStatusTool(policy, runner).ExecuteAsync(
+        GetGitStatusResponse response = await new GetGitStatusTool(policy, executables, runner).ExecuteAsync(
             new GetGitStatusRequest(temporary.Path),
             CancellationToken.None);
 
         BoundedProcessRequest request = Assert.Single(runner.Requests);
-        Assert.Equal("git", request.FileName);
+        Assert.Equal(RecordingExecutableResolver.GitPath, request.FileName);
         Assert.Contains("status", request.Arguments);
         Assert.Contains("core.fsmonitor=false", request.Arguments);
+        Assert.Contains("--ignore-submodules=all", request.Arguments);
+        List<string> arguments = [.. request.Arguments];
+        int gitDirectory = arguments.IndexOf("--git-dir");
+        int workTree = arguments.IndexOf("--work-tree");
+        Assert.True(gitDirectory >= 0);
+        Assert.True(workTree >= 0);
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(temporary.Path), ".git"),
+            request.Arguments[gitDirectory + 1]);
+        Assert.Equal(Path.GetFullPath(temporary.Path), request.Arguments[workTree + 1]);
+        Assert.Equal(Path.GetFullPath(temporary.Path), request.WorkingDirectory);
         Assert.DoesNotContain("powershell", request.Arguments, StringComparer.OrdinalIgnoreCase);
         Assert.Equal("0", request.AdditionalEnvironment?["GIT_OPTIONAL_LOCKS"]);
         Assert.Equal("## main...origin/main", response.BranchSummary);
@@ -100,12 +166,15 @@ public sealed class InitialToolExecutorTests
             string.Empty,
             false));
 
-        ExecuteSafeCommandResponse response = await new ExecuteSafeCommandTool(runner).ExecuteAsync(
+        RecordingExecutableResolver executables = new();
+        ExecuteSafeCommandResponse response = await new ExecuteSafeCommandTool(
+            executables,
+            runner).ExecuteAsync(
             new ExecuteSafeCommandRequest(command),
             CancellationToken.None);
 
         BoundedProcessRequest request = Assert.Single(runner.Requests);
-        Assert.Equal(executable, request.FileName);
+        Assert.EndsWith(executable + ".exe", request.FileName, StringComparison.OrdinalIgnoreCase);
         Assert.Equal([argument], request.Arguments);
         Assert.Null(request.WorkingDirectory);
         Assert.Equal(0, response.ExitCode);
@@ -145,6 +214,19 @@ public sealed class InitialToolExecutorTests
             Requests.Add(request);
             return ValueTask.FromResult(result);
         }
+    }
+
+    private sealed class RecordingExecutableResolver : ISafeExecutableResolver
+    {
+        public const string DotnetPath = "C:\\trusted\\dotnet.exe";
+        public const string GitPath = "C:\\trusted\\git.exe";
+
+        public string Resolve(SafeExecutableId executable) => executable switch
+        {
+            SafeExecutableId.Dotnet => DotnetPath,
+            SafeExecutableId.Git => GitPath,
+            _ => throw new InvalidOperationException(),
+        };
     }
 
     private sealed class TemporaryDirectory : IDisposable

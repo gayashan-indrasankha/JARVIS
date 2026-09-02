@@ -121,7 +121,7 @@ For deterministic push-to-talk, also set:
 $env:JARVIS_Voice__ActivationMode = "PushToTalk"
 ```
 
-Configuration uses tracked safe defaults plus `JARVIS_`-prefixed environment variables and command-line overrides. `LocalAi:Host` accepts exactly `127.0.0.1`; remote hosts, `0.0.0.0`, `localhost`, and IPv6 endpoints are rejected. Wake tuning keys are `Voice:WakeWord:KeywordScore` (1.5), `KeywordThreshold` (0.25), `CooldownSeconds` (3), and `ContinuationWindowSeconds` (30). These are provisional starting values and require physical testing before being called accurate. Other useful keys are `LocalAi:ContextSize` (8192, with one managed fallback to 4096), `LocalAi:GpuLayers`, `LocalAi:Threads`, `LocalAi:Port`, `Voice:TtsVoice`, `Voice:TtsSpeed`, and VAD thresholds in `appsettings.json`. Do not put machine-specific absolute paths in tracked settings.
+Configuration uses tracked safe defaults plus `JARVIS_`-prefixed environment variables and command-line overrides. `LocalAi:Host` accepts exactly `127.0.0.1`; remote hosts, `0.0.0.0`, `localhost`, and IPv6 endpoints are rejected. Local planning and generation have a bounded `LocalAi:GenerationTimeoutSeconds` (300 by default). Wake tuning keys are `Voice:WakeWord:KeywordScore` (1.5), `KeywordThreshold` (0.25), `CooldownSeconds` (3), and `ContinuationWindowSeconds` (30). These are provisional starting values and require physical testing before being called accurate. Other useful keys are `LocalAi:ContextSize` (8192, with one managed fallback to 4096), `LocalAi:GpuLayers`, `LocalAi:Threads`, `LocalAi:Port`, `Voice:TtsVoice`, `Voice:TtsSpeed`, and VAD thresholds in `appsettings.json`. Do not put machine-specific absolute paths in tracked settings.
 
 Filesystem tools start with no approved root. Opt in for the current PowerShell process, then run JARVIS:
 
@@ -130,9 +130,9 @@ $env:JARVIS_Tools__AllowedRoots__0 = (Get-Location).Path
 dotnet run --project src/Jarvis.Host/Jarvis.Host.csproj
 ```
 
-Use additional zero-based entries for more roots. `JARVIS_Tools__Enabled=false` disables the catalog; `JARVIS_Tools__AllowSafeLocalActions=false` keeps bounded reads but denies file/folder opening and application launch. Approved roots must be existing, fully qualified, non-root directories. Existing reparse-point paths and credential-oriented files/directories are rejected. Never commit local approved paths.
+Use additional zero-based entries for more roots. `JARVIS_Tools__Enabled=false` disables the catalog; `JARVIS_Tools__AllowSafeLocalActions=false` keeps bounded reads but denies file/folder opening and application launch. Approved roots must be existing, fully qualified, non-root directories on a local drive; UNC/network roots, existing reparse points, ambiguous Win32 aliases, alternate data streams, and credential-oriented files/directories are rejected. Never commit local approved paths.
 
-The initial tools are `list_directory`, `find_files`, `get_file_metadata`, `open_file`, `open_folder`, `read_text_file`, `launch_application`, `list_processes`, `get_system_metrics`, `get_git_status`, and `execute_safe_command`. The last accepts only fixed diagnostics (`dotnet_info`, `dotnet_version`, `git_version`); it cannot accept a command, arbitrary arguments, PowerShell, `cmd.exe`, or elevation.
+The initial tools are `list_directory`, `find_files`, `get_file_metadata`, `open_file`, `open_folder`, `read_text_file`, `launch_application`, `list_processes`, `get_system_metrics`, `get_git_status`, and `execute_safe_command`. `open_file` uses a conservative non-executable document allowlist rather than trusting arbitrary Windows file associations. Git status rejects `.git` indirection files. The last tool accepts only fixed diagnostics (`dotnet_info`, `dotnet_version`, `git_version`); their executables are resolved to direct paths before launch, and it cannot accept a command, arbitrary arguments, PowerShell, `cmd.exe`, or elevation.
 
 No secret is required. A managed llama-server receives a random per-process credential through its child environment for loopback defense in depth; it is never stored, placed on a command line, or logged.
 

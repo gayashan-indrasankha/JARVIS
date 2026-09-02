@@ -4,6 +4,7 @@ namespace Jarvis.Infrastructure.Tools;
 
 internal sealed class GetGitStatusTool(
     ToolPathPolicy pathPolicy,
+    ISafeExecutableResolver executableResolver,
     IBoundedProcessRunner processRunner) :
     IToolExecutor<GetGitStatusRequest, GetGitStatusResponse>
 {
@@ -13,27 +14,26 @@ internal sealed class GetGitStatusTool(
         GetGitStatusRequest request,
         CancellationToken cancellationToken)
     {
-        string repository = pathPolicy.NormalizeExistingDirectory(request.RepositoryPath);
-        if (!Directory.Exists(Path.Combine(repository, ".git")) &&
-            !File.Exists(Path.Combine(repository, ".git")))
-        {
-            throw new ToolValidationException("not_git_repository");
-        }
+        string repository = pathPolicy.NormalizeGitRepository(request.RepositoryPath);
+        string git = executableResolver.Resolve(SafeExecutableId.Git);
 
         BoundedProcessResult result = await processRunner.RunAsync(
             new BoundedProcessRequest(
-                "git",
+                git,
                 [
+                    "--git-dir",
+                    Path.Combine(repository, ".git"),
+                    "--work-tree",
+                    repository,
                     "-c",
                     "core.fsmonitor=false",
                     "-c",
                     "core.untrackedCache=false",
-                    "-C",
-                    repository,
                     "status",
                     "--short",
                     "--branch",
                     "--untracked-files=normal",
+                    "--ignore-submodules=all",
                 ],
                 AdditionalEnvironment: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
@@ -41,7 +41,8 @@ internal sealed class GetGitStatusTool(
                     ["GIT_OPTIONAL_LOCKS"] = "0",
                     ["GIT_CONFIG_GLOBAL"] = "NUL",
                     ["GIT_CONFIG_SYSTEM"] = "NUL",
-                }),
+                },
+                WorkingDirectory: repository),
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
@@ -64,20 +65,23 @@ internal sealed class GetGitStatusTool(
     }
 }
 
-internal sealed class ExecuteSafeCommandTool(IBoundedProcessRunner processRunner) :
+internal sealed class ExecuteSafeCommandTool(
+    ISafeExecutableResolver executableResolver,
+    IBoundedProcessRunner processRunner) :
     IToolExecutor<ExecuteSafeCommandRequest, ExecuteSafeCommandResponse>
 {
     public async ValueTask<ExecuteSafeCommandResponse> ExecuteAsync(
         ExecuteSafeCommandRequest request,
         CancellationToken cancellationToken)
     {
-        (string executable, string[] arguments, string name) = request.Command switch
+        (SafeExecutableId executableId, string[] arguments, string name) = request.Command switch
         {
-            SafeCommandId.DotnetInfo => ("dotnet", new[] { "--info" }, "dotnet_info"),
-            SafeCommandId.DotnetVersion => ("dotnet", new[] { "--version" }, "dotnet_version"),
-            SafeCommandId.GitVersion => ("git", new[] { "--version" }, "git_version"),
+            SafeCommandId.DotnetInfo => (SafeExecutableId.Dotnet, new[] { "--info" }, "dotnet_info"),
+            SafeCommandId.DotnetVersion => (SafeExecutableId.Dotnet, new[] { "--version" }, "dotnet_version"),
+            SafeCommandId.GitVersion => (SafeExecutableId.Git, new[] { "--version" }, "git_version"),
             _ => throw new ToolValidationException("safe_command_not_allowed"),
         };
+        string executable = executableResolver.Resolve(executableId);
         BoundedProcessResult result = await processRunner.RunAsync(
             new BoundedProcessRequest(
                 executable,

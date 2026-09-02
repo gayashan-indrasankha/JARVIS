@@ -57,6 +57,8 @@ The coordinator initializes only required components. Initial dormant mode does 
 
 `LlamaCppLocalLanguageModel` implements Core's final language-generation port. The adapter requests a persistent supervised connection and streams server-sent completion deltas from fixed loopback HTTP. It adds Qwen's `/no_think` control to the user turn, accepts only visible `content`, ignores `reasoning_content`, and bounds each event and aggregate visible output.
 
+Health probes and every planning/generation HTTP request have internal deadlines in addition to caller cancellation. The default generation deadline is 300 seconds so CPU fallback remains viable while a nonresponsive local server cannot hold a turn forever.
+
 `LlamaCppAgentPlanner` is a separate Infrastructure adapter. It requests non-streaming schema-constrained JSON with exactly one of `respond` or one reviewed tool contract. It registers no llama.cpp native executable tool and holds no executor/authorization/audit reference. Core's `ToolEnabledAgentRuntime` applies a maximum-step and identical-call policy, dispatches proposals through the tool kernel, labels successful results as untrusted data, then delegates confirmed history to the streaming language adapter. A malformed plan receives one constrained repair request; a second failure executes nothing. Failed, denied, invalid, repeated, timed-out, or unavailable outcomes use deterministic non-success wording instead of allowing the model to hallucinate completion.
 
 Managed `LlamaServerSupervisor`:

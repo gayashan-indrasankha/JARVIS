@@ -19,20 +19,40 @@ internal interface ILlamaServerHealthProbe
         CancellationToken cancellationToken);
 }
 
-internal sealed class LlamaServerHealthProbe(ILoopbackHttpClientFactory httpClientFactory) :
-    ILlamaServerHealthProbe
+internal sealed class LlamaServerHealthProbe : ILlamaServerHealthProbe
 {
+    private static readonly TimeSpan DefaultProbeTimeout = TimeSpan.FromSeconds(5);
+    private readonly ILoopbackHttpClientFactory _httpClientFactory;
+    private readonly TimeSpan _probeTimeout;
+
+    public LlamaServerHealthProbe(ILoopbackHttpClientFactory httpClientFactory)
+        : this(httpClientFactory, DefaultProbeTimeout)
+    {
+    }
+
+    internal LlamaServerHealthProbe(
+        ILoopbackHttpClientFactory httpClientFactory,
+        TimeSpan probeTimeout)
+    {
+        _httpClientFactory = httpClientFactory;
+        _probeTimeout = probeTimeout;
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(probeTimeout, TimeSpan.Zero);
+    }
+
     public async ValueTask<bool> IsReadyAsync(
         LlamaServerConnection connection,
         CancellationToken cancellationToken)
     {
-        using HttpClient client = httpClientFactory.Create(
+        using HttpClient client = _httpClientFactory.Create(
             connection.Endpoint,
             connection.AuthenticationToken);
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        timeout.CancelAfter(_probeTimeout);
         try
         {
             using HttpResponseMessage response = await client
-                .GetAsync("health", cancellationToken)
+                .GetAsync("health", timeout.Token)
                 .ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }

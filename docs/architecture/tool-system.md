@@ -77,17 +77,17 @@ Core defines five categories:
 
 ## Path and data policy
 
-Tracked defaults contain no approved filesystem root. A user explicitly configures one or more fully qualified, existing, non-root directories in `Tools:AllowedRoots`. The path policy canonicalizes with Windows case-insensitive comparison and requires the target to remain under an approved root. Relative paths are accepted only when there is exactly one root. Existing reparse-point components are rejected conservatively to prevent junction/symlink escape.
+Tracked defaults contain no approved filesystem root. A user explicitly configures one or more fully qualified, existing, non-root directories on local drives in `Tools:AllowedRoots`. The path policy canonicalizes with Windows case-insensitive comparison and requires the target to remain under an approved root. Relative paths are accepted only when there is exactly one root. UNC/network roots, existing reparse-point components, alternate data streams, Win32 trailing-dot/space aliases, and DOS short-name aliases are rejected conservatively. Git status supports a direct `.git` directory only, rejects indirection files, pins both `--git-dir` and `--work-tree` to validated paths, and ignores submodules so repository configuration cannot redirect the inspected work tree outside the approved root.
 
 Credential-oriented directories and files are denied even under an approved root, including common SSH, cloud, container, key, token, environment-secret, certificate, and password-store locations/types. Directory/search results omit denied entries. Text reads reject binary/NUL content, invalid UTF-8, and oversized files. File open rejects executable, installer, script, shortcut, and URL types.
 
-File content, filenames, Git output, process names, terminal output, documents, websites, and future external data are untrusted context. Before every plan, Core adds a higher-priority policy stating that such content is data, cannot alter policy, and cannot authorize or invoke a tool. Observations are explicitly labeled `[UNTRUSTED_TOOL_RESULT]` and bounded before reuse.
+File content, filenames, Git output, process names, terminal output, documents, websites, and future external data are untrusted context. `open_file` therefore accepts only a conservative set of non-executable document extensions rather than every registered Windows association. Before every plan, Core adds a higher-priority policy stating that such content is data, cannot alter policy, and cannot authorize or invoke a tool. Observations are explicitly labeled `[UNTRUSTED_TOOL_RESULT]` and bounded before reuse.
 
 ## Command and process constraints
 
-No initial executor invokes PowerShell, `cmd.exe`, a command interpreter, or a model-selected executable. The bounded process runner uses `UseShellExecute=false`, separate argument values, redirected bounded output, process-tree cancellation, and a minimal environment that excludes inherited credentials and model/tool settings.
+No initial executor invokes PowerShell, `cmd.exe`, a command interpreter, or a model-selected executable. The bounded process runner requires an existing fully qualified `.exe`, uses `UseShellExecute=false`, separate argument values, redirected bounded output, process-tree cancellation, and a minimal environment that excludes inherited credentials and model/tool settings. Fixed Git/.NET executable IDs are resolved from absolute `PATH` entries before launch; process creation never receives a bare name that could trigger current-directory search.
 
-`get_git_status` uses fixed read-only Git arguments, disables prompts, hooks/config influence where practical, optional locks, fsmonitor, and the untracked cache. `launch_application` maps a fixed enum to reviewed normal Windows applications. `open_file` and `open_folder` use the platform launcher only after validation and authorization.
+`get_git_status` uses fixed read-only Git arguments, disables prompts, hooks/config influence where practical, optional locks, fsmonitor, the untracked cache, and submodule traversal. `launch_application` maps a fixed enum to reviewed normal Windows applications. `open_file` and `open_folder` use the platform launcher only after validation and authorization.
 
 ## Loop and result controls
 

@@ -95,6 +95,52 @@ public sealed class LlamaCppAgentPlannerTests
         Assert.DoesNotContain("response", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task NonresponsivePlannerFailsAtConfiguredDeadline()
+    {
+        await using LlamaCppAgentPlanner planner = new(
+            new FakeSupervisor(),
+            new FakeHttpClientFactory(new BlockingHandler()),
+            TimeSpan.FromMilliseconds(50));
+
+        LocalComponentUnavailableException exception = await Assert.ThrowsAsync<
+            LocalComponentUnavailableException>(async () =>
+                await planner.PlanAsync(CreateRequest(), CancellationToken.None));
+
+        Assert.Equal("local_llm_request_timeout", exception.Code);
+    }
+
+    [Fact]
+    public async Task OversizedPlannerResponseIsRejectedAndRepaired()
+    {
+        RecordingHandler handler = new(
+            ResponseContent(new string('x', 20 * 1024)),
+            Response(new { action = "respond" }));
+        await using LlamaCppAgentPlanner planner = new(
+            new FakeSupervisor(),
+            new FakeHttpClientFactory(handler));
+
+        AgentPlan plan = await planner.PlanAsync(CreateRequest(), CancellationToken.None);
+
+        Assert.Equal(AgentPlanKind.Respond, plan.Kind);
+        Assert.Equal(2, handler.RequestBodies.Count);
+    }
+
+    [Fact]
+    public async Task InterruptedPlannerResponseUsesStableContentFreeError()
+    {
+        await using LlamaCppAgentPlanner planner = new(
+            new FakeSupervisor(),
+            new FakeHttpClientFactory(new InterruptedBodyHandler()));
+
+        LocalComponentUnavailableException exception = await Assert.ThrowsAsync<
+            LocalComponentUnavailableException>(async () =>
+                await planner.PlanAsync(CreateRequest(), CancellationToken.None));
+
+        Assert.Equal("local_llm_stream_interrupted", exception.Code);
+        Assert.DoesNotContain("simulated", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static AgentPlanningRequest CreateRequest() => new(
         [
             new ConversationMessage(ConversationRole.System, "Test persona."),
@@ -181,5 +227,66 @@ public sealed class LlamaCppAgentPlannerTests
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(new HttpResponseMessage(statusCode));
         }
+    }
+
+    private sealed class BlockingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _ = request;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable.");
+        }
+    }
+
+    private sealed class InterruptedBodyHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _ = request;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new InterruptedReadStream()),
+            });
+        }
+    }
+
+    private sealed class InterruptedReadStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new IOException("simulated planner stream interruption");
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(new IOException("simulated planner stream interruption"));
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 }

@@ -5,6 +5,8 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Jarvis.Core.Tools;
 using Jarvis.Core.Voice;
+using Jarvis.Infrastructure.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace Jarvis.Infrastructure.Voice.Local.Llama;
 
@@ -20,6 +22,7 @@ internal sealed class LlamaCppAgentPlanner : IAgentPlanner
 
     private readonly ILlamaServerSupervisor _supervisor;
     private readonly ILoopbackHttpClientFactory _httpClientFactory;
+    private readonly TimeSpan _requestTimeout;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private HttpClient? _client;
     private LlamaServerConnection? _connection;
@@ -27,10 +30,24 @@ internal sealed class LlamaCppAgentPlanner : IAgentPlanner
 
     public LlamaCppAgentPlanner(
         ILlamaServerSupervisor supervisor,
-        ILoopbackHttpClientFactory httpClientFactory)
+        ILoopbackHttpClientFactory httpClientFactory,
+        IOptions<LocalAiOptions> options)
+        : this(
+            supervisor,
+            httpClientFactory,
+            TimeSpan.FromSeconds(options.Value.GenerationTimeoutSeconds))
+    {
+    }
+
+    internal LlamaCppAgentPlanner(
+        ILlamaServerSupervisor supervisor,
+        ILoopbackHttpClientFactory httpClientFactory,
+        TimeSpan? requestTimeout = null)
     {
         _supervisor = supervisor;
         _httpClientFactory = httpClientFactory;
+        _requestTimeout = requestTimeout ?? TimeSpan.FromMinutes(5);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_requestTimeout, TimeSpan.Zero);
     }
 
     public async ValueTask InitializeAsync(CancellationToken cancellationToken)
@@ -99,17 +116,28 @@ internal sealed class LlamaCppAgentPlanner : IAgentPlanner
         {
             Content = JsonContent.Create(payload),
         };
+        using CancellationTokenSource requestCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestCancellation.CancelAfter(_requestTimeout);
+        CancellationToken requestToken = requestCancellation.Token;
 
         HttpResponseMessage response;
         try
         {
-            response = await client.SendAsync(message, cancellationToken).ConfigureAwait(false);
+            response = await client
+                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, requestToken)
+                .ConfigureAwait(false);
         }
         catch (HttpRequestException)
         {
             throw new LocalComponentUnavailableException(
                 "local_llm_unavailable",
                 "The local language model stopped responding during tool planning.");
+        }
+        catch (OperationCanceledException) when (
+            requestCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw CreateRequestTimeout();
         }
 
         using (response)
@@ -121,13 +149,32 @@ internal sealed class LlamaCppAgentPlanner : IAgentPlanner
                     "The local language model rejected the structured planning request.");
             }
 
-            await using Stream stream = await response.Content
-                .ReadAsStreamAsync(cancellationToken)
-                .ConfigureAwait(false);
-            string body = await ReadBoundedAsync(stream, cancellationToken).ConfigureAwait(false);
-            return TryParseResponse(body);
+            try
+            {
+                await using Stream stream = await response.Content
+                    .ReadAsStreamAsync(requestToken)
+                    .ConfigureAwait(false);
+                string body = await ReadBoundedAsync(stream, requestToken).ConfigureAwait(false);
+                return TryParseResponse(body);
+            }
+            catch (OperationCanceledException) when (
+                requestCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                throw CreateRequestTimeout();
+            }
+            catch (Exception exception) when (exception is HttpRequestException or IOException)
+            {
+                throw new LocalComponentUnavailableException(
+                    "local_llm_stream_interrupted",
+                    "The local language model connection ended during tool planning.");
+            }
         }
     }
+
+    private static LocalComponentUnavailableException CreateRequestTimeout() =>
+        new(
+            "local_llm_request_timeout",
+            "The local language model did not complete tool planning before the configured deadline.");
 
     private static PlannerChatRequest CreateRequest(
         AgentPlanningRequest request,

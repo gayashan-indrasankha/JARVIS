@@ -53,9 +53,8 @@ public sealed class IncrementalResponseSegmenter
     private void AppendVisibleText(string text, bool flush)
     {
         string combined = string.Concat(_markerCarry, text);
-        int processLimit = flush
-            ? combined.Length
-            : combined.Length - GetMarkerCarryLength(combined);
+        int markerCarryLength = GetMarkerCarryLength(combined);
+        int processLimit = combined.Length - markerCarryLength;
         int index = 0;
         while (index < processLimit)
         {
@@ -87,7 +86,7 @@ public sealed class IncrementalResponseSegmenter
             }
         }
 
-        _markerCarry = combined[index..];
+        _markerCarry = flush ? string.Empty : combined[index..];
     }
 
     private static int GetMarkerCarryLength(string text)
