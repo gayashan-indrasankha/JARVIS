@@ -92,3 +92,27 @@ internal static class InitialToolSchemas
     public const string ExecuteSafeCommand =
         """{"type":"object","additionalProperties":false,"required":["command"],"properties":{"command":{"type":"string","enum":["dotnet_info","dotnet_version","git_version"]}}}""";
 }
+
+internal static class ProjectToolSchemas
+{
+    public const string RepositoryOnly =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048}}}""";
+
+    public const string Search =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath","query"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"query":{"type":"string","minLength":1,"maxLength":256},"maximumResults":{"type":"integer","minimum":1,"maximum":256,"default":10}}}""";
+
+    public const string Symbol =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath","symbol"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"symbol":{"type":"string","minLength":1,"maxLength":512},"maximumResults":{"type":"integer","minimum":1,"maximum":256,"default":10}}}""";
+
+    public const string ExplainSymbol =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath","symbol"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"symbol":{"type":"string","minLength":1,"maxLength":512}}}""";
+
+    public const string TraceDependency =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath","sourceSymbol"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"sourceSymbol":{"type":"string","minLength":1,"maxLength":512},"targetSymbol":{"type":["string","null"],"minLength":1,"maxLength":512},"maximumDepth":{"type":"integer","minimum":1,"maximum":8,"default":4}}}""";
+
+    public const string TraceRequestFlow =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath","endpoint"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"endpoint":{"type":"string","minLength":1,"maxLength":512},"maximumDepth":{"type":"integer","minimum":1,"maximum":8,"default":6}}}""";
+
+    public const string ListEndpoints =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"maximumResults":{"type":"integer","minimum":1,"maximum":256,"default":100}}}""";
+}

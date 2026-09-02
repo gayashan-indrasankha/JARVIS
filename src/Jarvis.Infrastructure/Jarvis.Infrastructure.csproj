@@ -10,6 +10,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="NAudio.WinMM" />
     <PackageReference Include="org.k2fsa.sherpa.onnx" />
   </ItemGroup>

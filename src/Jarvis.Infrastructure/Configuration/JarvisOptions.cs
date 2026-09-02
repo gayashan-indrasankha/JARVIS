@@ -143,3 +143,28 @@ public sealed class ToolOptions
 
     public List<string> AllowedRoots { get; set; } = [];
 }
+
+public sealed class ProjectIntelligenceOptions
+{
+    public const string SectionName = "ProjectIntelligence";
+
+    public bool Enabled { get; set; } = true;
+
+    public int MaximumFiles { get; set; } = 20_000;
+
+    public int MaximumSourceFileBytes { get; set; } = 2 * 1024 * 1024;
+
+    public int MaximumTotalTextBytes { get; set; } = 64 * 1024 * 1024;
+
+    public int MaximumContextCharacters { get; set; } = 8_192;
+
+    public int MaximumExcerptCharacters { get; set; } = 1_500;
+
+    public int WatchDebounceMilliseconds { get; set; } = 750;
+
+    public int MaximumWatchedRepositories { get; set; } = 8;
+
+    public int IndexTimeoutSeconds { get; set; } = 120;
+
+    public int QueryTimeoutSeconds { get; set; } = 15;
+}

@@ -28,6 +28,6 @@ Voice interaction should have low perceived latency: speech start/end is detecte
 
 The persona is calm, concise, professional, technically precise, and honest about capability. It does not reveal hidden reasoning or claim that an action completed without a confirmed tool result.
 
-## Current 0.2 scope
+## Current 0.3 scope
 
-Version 0.2 retains the local voice vertical slice—supervised loopback llama.cpp/Qwen3 inference, sherpa-onnx wake-word/VAD/ASR/TTS, Windows audio, streaming segmentation, barge-in, push-to-talk, and text debugging—and adds the first permission-controlled typed tool kernel. Its bounded catalog supports approved local reads and a few visible local actions; it does not provide writes, deletion, arbitrary shell, elevation, credential access, project intelligence, persistent memory, GUI automation, or IoT. See [the roadmap](roadmap.md) for staged scope.
+Version 0.3 retains the local voice vertical slice and permission-controlled typed tool kernel, then adds opt-in local C#/.NET Project Intelligence. Approved repositories are discovered and indexed without evaluating MSBuild or executing repository content; answers use bounded Roslyn/FTS evidence with file and line provenance. It does not provide writes, deletion, arbitrary shell, elevation, credential access, persistent memory, GUI automation, or IoT. See [the roadmap](roadmap.md) for staged scope.

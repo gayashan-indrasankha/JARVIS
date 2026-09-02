@@ -22,6 +22,7 @@ ADRs capture expensive, cross-module, or security-boundary choices. Small implem
 | [0002](0002-local-inference-and-speech-runtime.md) | Local llama.cpp and sherpa-onnx voice runtime | Accepted |
 | [0003](0003-local-wake-word-activation.md) | Local open-vocabulary wake activation and continuation lifecycle | Accepted |
 | [0004](0004-permission-controlled-local-tool-kernel.md) | Permission-controlled local tool kernel and bounded Windows adapter slice | Accepted |
+| [0005](0005-local-project-intelligence-index.md) | Static Roslyn plus SQLite/FTS Project Intelligence through the typed tool kernel | Accepted |
 
 ## ADR template
 

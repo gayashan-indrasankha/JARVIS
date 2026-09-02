@@ -1,4 +1,5 @@
 using System.Reflection;
+using Jarvis.Core.ProjectIntelligence;
 using Jarvis.Core.Tools;
 using Jarvis.Infrastructure.Configuration;
 using Jarvis.Infrastructure.Voice.Local.Llama;
@@ -38,6 +39,7 @@ public sealed class InfrastructureDependencyTests
             typeof(IToolDispatcher),
             typeof(IToolAuthorizationPolicy),
             typeof(IToolAuditSink),
+            typeof(IProjectIntelligenceService),
         ];
 
         foreach (Type adapter in adapters)

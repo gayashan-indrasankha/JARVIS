@@ -2,7 +2,7 @@
 
 JARVIS is a Windows-first, local-first personal computing agent built with C# and .NET 10. Codex is used to develop the repository and is never a JARVIS runtime dependency.
 
-Version **0.2 permission-controlled local computer agent** runs its conversation pipeline on the user's computer: a dormant sherpa-onnx “Jarvis” keyword spotter, Windows audio, Silero VAD, streaming Zipformer speech recognition, a Qwen3 model served by a supervised llama.cpp child process, typed permission-controlled tools, Kokoro speech synthesis, and speaker playback. Text debugging, push-to-talk, explicit interruption, voice barge-in, and tool requests share the same local orchestration. File writes/deletion, arbitrary shell, administrator operations, credential access, project indexing, memory, UI automation, interviews, and IoT are not implemented.
+Version **0.3 fully local Project Intelligence** retains the local voice and permission-controlled computer agent and adds opt-in analysis of approved C#/.NET Git repositories. Static project loading, Roslyn, incremental SHA-256 snapshots, SQLite/FTS5 retrieval, Git metadata, and evidence-grounded ProjectTools all run locally. Repository code, MSBuild targets, scripts, packages, and binaries are never executed merely to understand a project. File writes/deletion, arbitrary shell, administrator operations, memory, UI automation, interviews, and IoT are not implemented.
 
 After the user explicitly installs the pinned runtime and model assets, normal JARVIS operation requires no API key, paid API, cloud AI service, telemetry, model download, or Internet connection.
 
@@ -10,12 +10,12 @@ After the user explicitly installs the pinned runtime and model assets, normal J
 
 ```text
 src/
-  Jarvis.Core/            Provider/platform-neutral conversation, voice, and tool contracts/orchestration
-  Jarvis.Infrastructure/  local AI/audio plus validated, authorized Windows tool adapters
+  Jarvis.Core/            Provider/platform-neutral conversation, voice, tool, and project-evidence contracts
+  Jarvis.Infrastructure/  local AI/audio, Windows tools, Roslyn, SQLite/FTS, and safe project discovery
   Jarvis.Host/            .NET Generic Host composition root and console lifecycle
 tests/
   Jarvis.Core.Tests/      Orchestration, wake lifecycle, cancellation, segmentation, and boundary tests
-  Jarvis.Infrastructure.Tests/  Local adapter, process, path, and configuration tests
+  Jarvis.Infrastructure.Tests/  Local adapter, process, path, project-index, and configuration tests
 config/
   local-model-manifest.json     Tracked pins, checksums, licenses, and hardware guidance
 scripts/
@@ -31,7 +31,7 @@ Jarvis.Host ────────> Jarvis.Infrastructure ──────�
      └──────────────────────────────────────────────> Jarvis.Core
 ```
 
-`Jarvis.Core` has no llama.cpp, sherpa-onnx, NAudio, Windows, HTTP, model, database, logging, or UI implementation dependency. Local HTTP and native types terminate inside Infrastructure.
+`Jarvis.Core` has no llama.cpp, sherpa-onnx, NAudio, Roslyn, SQLite, Windows, HTTP, model, database, logging, or UI implementation dependency. Local HTTP, native, compiler-workspace, and persistence types terminate inside Infrastructure.
 
 ## Development setup
 
@@ -97,7 +97,7 @@ At the console:
 - `/falsewake` records a content-free false-activation metric and returns to sleep;
 - `/stop` stops the session; `/quit` shuts down the host and managed child process.
 
-Ordinary spoken or typed requests can select the 0.2 tool catalog through the local model. The model can propose only closed-schema requests; trusted code performs exact lookup, validation, path normalization, authorization, bounded execution, and content-minimized audit before any OS operation. Tool results are labeled untrusted data and are passed back to the local model only after execution. An action is never presented as successful until the executor confirms it.
+Ordinary spoken or typed requests can select the trusted tool catalog through the local model. The model can propose only closed-schema requests; trusted code performs exact lookup, validation, path normalization, authorization, bounded execution, and content-minimized audit before any OS or project-index operation. Tool results are labeled untrusted data and are passed back to the local model only after execution. An action is never presented as successful until the executor confirms it.
 
 To enable microphone VAD and spoken output for a process:
 
@@ -132,7 +132,29 @@ dotnet run --project src/Jarvis.Host/Jarvis.Host.csproj
 
 Use additional zero-based entries for more roots. `JARVIS_Tools__Enabled=false` disables the catalog; `JARVIS_Tools__AllowSafeLocalActions=false` keeps bounded reads but denies file/folder opening and application launch. Approved roots must be existing, fully qualified, non-root directories on a local drive; UNC/network roots, existing reparse points, ambiguous Win32 aliases, alternate data streams, and credential-oriented files/directories are rejected. Never commit local approved paths.
 
-The initial tools are `list_directory`, `find_files`, `get_file_metadata`, `open_file`, `open_folder`, `read_text_file`, `launch_application`, `list_processes`, `get_system_metrics`, `get_git_status`, and `execute_safe_command`. `open_file` uses a conservative non-executable document allowlist rather than trusting arbitrary Windows file associations. Git status rejects `.git` indirection files. The last tool accepts only fixed diagnostics (`dotnet_info`, `dotnet_version`, `git_version`); their executables are resolved to direct paths before launch, and it cannot accept a command, arbitrary arguments, PowerShell, `cmd.exe`, or elevation.
+The 0.2 tools remain `list_directory`, `find_files`, `get_file_metadata`, `open_file`, `open_folder`, `read_text_file`, `launch_application`, `list_processes`, `get_system_metrics`, `get_git_status`, and `execute_safe_command`. Version 0.3 adds `analyze_project`, `get_project_overview`, `search_project`, `find_symbol`, `explain_symbol`, `find_references`, `trace_dependency`, `trace_request_flow`, `list_api_endpoints`, `list_project_dependencies`, and `explain_architecture`. Every one uses the same registry, closed schema, validation, authorization, timeout, audit, and result-size boundary.
+
+## Analyze a local project
+
+Approve the repository itself (or a narrow parent), then run JARVIS and ask it to analyze before querying:
+
+```powershell
+$env:JARVIS_Tools__AllowedRoots__0 = "C:\fully-qualified\source\MyRepository"
+dotnet run --project src/Jarvis.Host/Jarvis.Host.csproj
+```
+
+Example text or voice requests:
+
+- `Analyze this project.`
+- `What does this project do? Show the files supporting your answer.`
+- `Where is dependency injection configured?`
+- `How does authentication work?`
+- `Trace POST /api/orders from the controller toward the database.`
+- `Which classes implement IOrderService?`
+
+`analyze_project` is a `SAFE_LOCAL_ACTION` because it creates a local index and starts a bounded watcher; project queries are `SAFE_READ`. The repository must be a direct Git working tree under an approved root. JARVIS discovers `.sln`, `.slnx`, `.csproj`, C# source, bounded documentation, and configuration text. It statically parses project XML with DTD/entity resolution disabled and builds an in-memory Roslyn `AdhocWorkspace`; it does not use `MSBuildWorkspace`, restore packages, build, run generators, load repository DLLs, or execute targets/scripts.
+
+Project answers carry `PROJECT FACT`, `INFERENCE`, or `GENERAL SOFTWARE ENGINEERING KNOWLEDGE` classifications. A project fact includes the indexed snapshot plus a repository-relative file and exact one-based line range. Retrieval prioritizes exact symbols and Roslyn relationships before FTS/source context and caps the default evidence bundle at 8,192 characters so its serialized tool result remains below the broker cap. The entire repository is never placed into the local model prompt.
 
 No secret is required. A managed llama-server receives a random per-process credential through its child environment for loopback defense in depth; it is never stored, placed on a command line, or logged.
 
@@ -145,13 +167,14 @@ The data-root layout is:
   Models\{Llm,Speech,Tts,Vad,WakeWord}\
   Runtime\LlamaCpp\
   Data\
+    ProjectIntelligence\project-index.db
   Logs\
   Cache\
 ```
 
-Normal runtime makes only fixed `http://127.0.0.1:<port>` llama-server requests. It contains no external HTTP/WebSocket client path, cloud AI SDK, telemetry, updater, or background downloader. Setup is the sole intentional external-download workflow. Structured metrics include timing, rate, lifecycle, and sanitized failure classes; raw audio, transcripts, prompts, responses, hidden reasoning, credentials, and machine identity are not logged or persisted by default. Console transcripts are visible to the interactive user and can be persisted if that user redirects console output.
+Normal runtime makes only fixed `http://127.0.0.1:<port>` llama-server requests. It contains no external HTTP/WebSocket client path, cloud AI SDK, telemetry, updater, or background downloader. Setup is the sole intentional external-download workflow. Project indexes stay under `JARVIS_HOME\Data\ProjectIntelligence`, never inside a repository; they contain source-derived local data and can be deleted by the user when JARVIS is stopped. Structured metrics include timing, counts, context size, lifecycle, and sanitized failure classes; raw audio, transcripts, prompts, responses, hidden reasoning, repository content/queries/paths, credentials, and machine identity are not logged by default. Console transcripts and evidence are visible to the interactive user and can be persisted if that user redirects console output.
 
-See [security](docs/architecture/security.md), [tool architecture](docs/architecture/tool-system.md), [voice architecture](docs/architecture/voice.md), [ADR 0002](docs/decisions/0002-local-inference-and-speech-runtime.md), [ADR 0003](docs/decisions/0003-local-wake-word-activation.md), and [ADR 0004](docs/decisions/0004-permission-controlled-local-tool-kernel.md) for the exact guarantees and trust boundaries.
+See [security](docs/architecture/security.md), [tool architecture](docs/architecture/tool-system.md), [voice architecture](docs/architecture/voice.md), [Project Intelligence](docs/architecture/project-intelligence.md), [ADR 0002](docs/decisions/0002-local-inference-and-speech-runtime.md), [ADR 0003](docs/decisions/0003-local-wake-word-activation.md), [ADR 0004](docs/decisions/0004-permission-controlled-local-tool-kernel.md), and [ADR 0005](docs/decisions/0005-local-project-intelligence-index.md) for the exact guarantees and trust boundaries.
 
 Third-party model/runtime licenses and redistribution obligations are inventoried in [third-party licenses](docs/security/third-party-licenses.md). The current repository downloads assets for local use and does not itself redistribute them; packaging requires a fresh bill-of-materials and legal review.
 
@@ -162,10 +185,12 @@ Third-party model/runtime licenses and redistribution obligations are inventorie
 - The initial ASR profile is small and English-only. Accent accuracy must be benchmarked before broader claims.
 - Kokoro synthesis runs on CPU and cancellation is cooperative at its native callback boundary.
 - Conversation/tool history is bounded in memory and is not persisted. Tool audit events currently use content-minimized structured logs rather than durable tamper-resistant storage.
-- Confirmation-class policies fail closed because 0.2 has no interactive grant surface. The implemented catalog contains only bounded reads and optional safe local actions; writes, deletion, arbitrary commands, elevation, credentials, and UI automation are absent.
+- Project loading intentionally supports SDK-style C# discovery through static XML and Roslyn source analysis; conditional MSBuild evaluation, generated source, non-C# semantic analysis, compile-time generator output, runtime call graphs, and vector search are not part of 0.3.
+- Static request/dependency traces are best-effort. Dynamic dispatch, reflection, middleware branches, configuration-selected providers, and unresolved packages may require an explicit `INFERENCE` or manual runtime verification.
+- Confirmation-class policies fail closed because 0.3 has no interactive grant surface. The implemented catalog contains only bounded reads and optional safe local actions; writes, deletion, arbitrary commands, elevation, credentials, and UI automation are absent.
 - Wake-word capture uses one CPU inference thread, but actual idle CPU/battery use must be measured on target laptops. The assistant speaker may retrigger or mask the microphone because echo cancellation is not implemented; headphones are the reliable baseline.
 
-Use the [manual local voice smoke test](docs/testing/manual-voice-smoke-test.md), [wake-word matrix](docs/testing/manual-wake-word-test-matrix.md), and [manual tool smoke test](docs/testing/manual-tool-smoke-test.md) before declaring a machine validated. Contributor instructions are in [AGENTS.md](AGENTS.md).
+Use the [manual local voice smoke test](docs/testing/manual-voice-smoke-test.md), [wake-word matrix](docs/testing/manual-wake-word-test-matrix.md), [manual tool smoke test](docs/testing/manual-tool-smoke-test.md), and [Project Intelligence smoke test](docs/testing/manual-project-intelligence-smoke-test.md) before declaring a machine validated. Contributor instructions are in [AGENTS.md](AGENTS.md).
 
 ## Documentation map
 

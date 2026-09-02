@@ -23,7 +23,7 @@ Model output (untrusted)
   -> typed proposal -> validation/normalization -> authorization -> bounded adapter -> audit
 ```
 
-The 0.2 planner receives only reviewed tool descriptions and closed JSON schemas. It references no dispatcher, authorization/audit service, or OS adapter. Core's agent loop translates a proposal into the single dispatcher path. Wake inference receives only transient microphone frames and has no LLM, network, filesystem, or tool reference. Voice and text input use the same agent boundary.
+The local planner receives only reviewed tool descriptions and closed JSON schemas. It references no dispatcher, authorization/audit service, project index, or OS adapter. Core's agent loop translates a proposal into the single dispatcher path. Wake inference receives only transient microphone frames and has no LLM, network, filesystem, or tool reference. Voice and text input use the same agent boundary.
 
 ## Offline/network policy
 
@@ -51,6 +51,8 @@ External mode is explicit and loopback-only. Because 0.1 has no configuration fo
 `JARVIS_HOME` must be fully qualified, contain no control character, be outside Git, not traverse an existing reparse point, and not be a filesystem root. Asset resolution rejects rooted relative values, canonicalizes under the expected subtree, and rejects existing reparse-point components, preventing lexical or junction/symlink escape. Tracked configuration stores logical IDs and numeric safe defaults, not absolute machine paths or identity.
 
 Model weights, ONNX files, native runtime archives/binaries, local installation metadata, logs, caches, databases, indexes, and environment-specific settings are ignored and belong under `%LOCALAPPDATA%\JARVIS` (or explicit `JARVIS_HOME`). The tracked manifest pins upstream URLs, versions, names, licenses, and authoritative SHA-256 values where available. Setup verifies known hashes, cleans failed partial downloads, validates archive paths/types, extracts model archives into a private staging directory before moving them into place, and explicitly warns for the Zipformer archive whose upstream authoritative hash is unavailable. Setup installs nothing globally and never runs during app startup.
+
+Project Intelligence stores its SQLite/FTS index under `JARVIS_HOME\Data\ProjectIntelligence`, never inside an analyzed repository. The index contains private source-derived text, hashes, paths relative to the approved repository, symbols, and relationships. It is local user data, is not logged or transmitted, and may be deleted while JARVIS is stopped. Repository roots remain opt-in and tracked configuration contains none.
 
 No API key or user secret is part of runtime configuration. Environment variables may reveal non-secret configuration to same-user processes and must not be repurposed for future secrets without a dedicated design.
 
@@ -86,9 +88,19 @@ Every dispatcher terminal path writes an audit event with IDs, tool, decision, t
 
 Tool results are untrusted. Files, repositories, terminal output, websites, documents, and process names can contain prompt injection. Core labels observations as untrusted data and injects a policy that content cannot override JARVIS policy, authorize an action, or invoke a tool. Each subsequent proposal still traverses the full dispatcher. A local model is never trusted merely because it is local.
 
+## Untrusted repository analysis
+
+Project analysis reuses the exact dispatcher invariant. `analyze_project` is a `SAFE_LOCAL_ACTION`; every query is `SAFE_READ`. Validation canonicalizes a direct Git repository under an approved root before authorization. The model has no direct reference to discovery, Roslyn, SQLite, Git, the filesystem, or the watcher.
+
+Discovery is bounded by file count, per-file bytes, total bytes, accepted text types, cancellation, and a no-reparse traversal. It excludes Git/build/generated/package/IDE/cache trees plus credential names/types and `.env*` before reading. Project XML prohibits DTDs and external entities. The implementation deliberately does not use `MSBuildWorkspace` or invoke MSBuild because evaluation could load hostile imports/tasks. It never restores, builds, runs generators/tests/scripts, loads repository binaries, or accepts a repository-selected process/argument.
+
+Only a fixed read-only Git status invocation executes, through the existing direct executable resolver, minimal environment, fixed `--git-dir`/`--work-tree`, disabled prompt/config features, bounded output, and cancellation. Repository hooks and submodules are not run.
+
+SQLite operations use parameterized values. FTS query syntax is built from at most eight bounded alphanumeric/underscore tokens; arbitrary query operators are not passed through. Transactions replace one repository snapshot atomically. Retrieval caps candidates, traversal depth, excerpts, total evidence characters, tool result characters, and local-model context. Returned source is explicitly untrusted and every project fact must cite an actual indexed file/line/hash/snapshot.
+
 ## Verification
 
-Automated architecture tests reject outer/model/native/network dependencies from Core and reject tool dispatcher/authorization/audit references from model adapters. Tool tests cover closed schemas, unknown/malformed proposals, validation/authorization order, denial, approved-root/credential/reparse defenses, fixed command mappings, duplicate calls, cancellation, timeout, truncation, audit completeness, prompt-injection labeling, and temporary-directory behavior. Configuration/path/loopback tests reject unsafe values. Supervisor and voice tests cover lifecycle, fallback, cancellation, barge-in, and stale output. Repository gates scan for secrets, external endpoint remnants, tracked model/runtime artifacts, and warnings.
+Automated architecture tests reject outer/model/native/network/Roslyn/SQLite dependencies from Core and reject tool dispatcher/authorization/audit/project-index references from model adapters. Tool tests cover closed schemas, unknown/malformed proposals, validation/authorization order, denial, approved-root/credential/reparse defenses, fixed command mappings, duplicate calls, cancellation, timeout, truncation, audit completeness, prompt-injection labeling, and temporary-directory behavior. Project tests prove safe static loading, inert hostile targets, DTD denial, exclusions, exact evidence, incremental snapshots, retrieval/context limits, cancellation, and debounce. Configuration/path/loopback tests reject unsafe values. Supervisor and voice tests cover lifecycle, fallback, cancellation, barge-in, and stale output. Repository gates scan for secrets, external endpoint remnants, tracked model/runtime artifacts, and warnings.
 
 Physical device release, GPU behavior, local process termination, offline operation, and privacy log inspection are explicitly manual in [the smoke test](../testing/manual-voice-smoke-test.md).
 
