@@ -4,7 +4,7 @@
 
 Tools are the only route from local reasoning to operating-system observation or action. A model proposes a narrow JSON request; trusted application code decides whether anything runs. Catalog membership never implies permission, local inference never implies trust, and no model adapter owns an OS handle or executor.
 
-Version 0.2 implements the first bounded tool kernel and a deliberately small Windows adapter slice. It is one module in the local application, not a plugin shell or microservice.
+Version 0.2 implemented the first bounded tool kernel and Windows adapter slice. Version 0.3 reuses that same module for local Project Intelligence rather than creating a bypass, plugin shell, or microservice.
 
 ## Dependency and trust boundaries
 
@@ -25,7 +25,7 @@ untrusted user/ASR text
 
 The model receives tool names, descriptions, and closed JSON schemas. It does not receive an executor, `Process`, filesystem object, `IServiceProvider`, PowerShell, a native llama tool runner, or a way to register catalog entries. Provider response objects terminate in Infrastructure.
 
-## Initial catalog
+## Catalog through 0.3
 
 The catalog is constructed from reviewed code and exposes exactly:
 
@@ -42,10 +42,21 @@ The catalog is constructed from reviewed code and exposes exactly:
 | `get_system_metrics` | CPU and memory facts | `SAFE_READ` |
 | `get_git_status` | approved repository; fixed read-only Git arguments | `SAFE_READ` |
 | `execute_safe_command` | fixed diagnostic enum only | `SAFE_READ` |
+| `analyze_project` | approved direct Git repository; bounded static local index | `SAFE_LOCAL_ACTION` |
+| `get_project_overview` | previously indexed repository | `SAFE_READ` |
+| `search_project` | bounded query/results against local symbol/FTS index | `SAFE_READ` |
+| `find_symbol` | bounded exact/qualified symbol | `SAFE_READ` |
+| `explain_symbol` | bounded symbol plus relationships | `SAFE_READ` |
+| `find_references` | bounded symbol relationships | `SAFE_READ` |
+| `trace_dependency` | bounded source/optional target/depth | `SAFE_READ` |
+| `trace_request_flow` | bounded endpoint/depth | `SAFE_READ` |
+| `list_api_endpoints` | bounded endpoint facts | `SAFE_READ` |
+| `list_project_dependencies` | static project/package facts | `SAFE_READ` |
+| `explain_architecture` | bounded project/DI/API/data/test evidence | `SAFE_READ` |
 
 Contracts reject unknown members and enum values. The safe-command enum contains only `dotnet_info`, `dotnet_version`, and `git_version`. It has no program, argument, working-directory, environment, shell, or elevation field. Dedicated structured tools must be used when they exist.
 
-Writes, changes, deletion, termination, administrator shell, credential access, generic command execution, UI automation, network access, and arbitrary application paths are not implemented.
+ProjectTools do not broaden the process boundary: analysis never evaluates MSBuild, restores/builds, runs generators/tests/scripts, loads repository binaries, or sends content over a network. Writes, repository mutation, deletion, termination, administrator shell, credential access, generic command execution, UI automation, network access, and arbitrary application paths are not implemented.
 
 ## Required execution order
 
@@ -93,7 +104,7 @@ No initial executor invokes PowerShell, `cmd.exe`, a command interpreter, or a m
 
 Each user request receives a correlation ID. The agent loop has a configured maximum of one to eight tool steps (default four). An identical normalized call is rejected within that request. Planner structured output is bounded and gets at most one repair request; a second malformed response stops without execution. Cancellation propagates across planning, authorization, executor, subprocess, final generation, TTS, and host shutdown.
 
-Each tool has a timeout and result-character maximum. Traversal, item count, file size, process output, model history, and planner response size also have local caps. JARVIS reports success only when the typed outcome is `Success`. A denial, invalid input, duplicate, timeout, unavailable executor, or failure returns a deterministic non-success message without delegating wording to the model; caller cancellation stops the turn.
+Each tool has a timeout and result-character maximum. Traversal, item count, file size, total project text, project relationship depth, evidence context, process output, model history, and planner response size also have local caps. JARVIS reports success only when the typed outcome is `Success`. A denial, invalid input, duplicate, timeout, unavailable executor, or failure returns a deterministic non-success message without delegating wording to the model; caller cancellation stops the turn.
 
 ## Audit
 
@@ -135,4 +146,4 @@ $env:JARVIS_Tools__AllowedRoots__0 = (Get-Location).Path
 
 Automated tests cover exact schemas/catalog, malformed/unknown proposals, ordering, approved roots, credential/reparse defenses, denial, success, duplicates, cancellation, timeout, truncation, fixed process mappings, temporary-directory filesystem/Git behavior, planner repair, audit completeness, and adapter separation. Real interactive window opening and a model-generated acceptance flow require the manual tool smoke test.
 
-Deferred scope includes interactive approval grants, durable audit persistence, write/delete tools, arbitrary commands, administrator operations, richer process/application actions, UI automation, and project intelligence. These capabilities must reuse this dispatcher and cannot broaden an existing contract silently.
+Deferred scope includes interactive approval grants, durable audit persistence, write/delete tools, arbitrary commands, administrator operations, richer process/application actions, UI automation, project mutation, and deeper runtime/semantic project analysis. These capabilities must reuse this dispatcher and cannot broaden an existing contract silently.

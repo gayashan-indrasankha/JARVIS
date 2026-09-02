@@ -1,6 +1,8 @@
+using Jarvis.Core.ProjectIntelligence;
 using Jarvis.Core.Tools;
 using Jarvis.Core.Voice;
 using Jarvis.Infrastructure.Configuration;
+using Jarvis.Infrastructure.ProjectIntelligence;
 using Jarvis.Infrastructure.Tools;
 using Jarvis.Infrastructure.Voice;
 using Jarvis.Infrastructure.Voice.Local;
@@ -118,6 +120,25 @@ public static class ServiceCollectionExtensions
                 "Every configured tool root must be an absolute, non-root path without control characters.")
             .ValidateOnStart();
 
+        services
+            .AddOptions<ProjectIntelligenceOptions>()
+            .Bind(configuration.GetSection(ProjectIntelligenceOptions.SectionName))
+            .Validate(
+                options => options.MaximumFiles is >= 1 and <= 100_000 &&
+                    options.MaximumSourceFileBytes is >= 4_096 and <= 16 * 1024 * 1024 &&
+                    options.MaximumTotalTextBytes is >= 1024 * 1024 and <= 512 * 1024 * 1024 &&
+                    options.MaximumContextCharacters is >= 4_096 and <=
+                        ToolDataLimits.MaximumObservationCharacters &&
+                    options.MaximumExcerptCharacters is >= 256 and <= 4_096,
+                "Project intelligence file and context limits are invalid.")
+            .Validate(
+                options => options.WatchDebounceMilliseconds is >= 100 and <= 30_000 &&
+                    options.MaximumWatchedRepositories is >= 1 and <= 32 &&
+                    options.IndexTimeoutSeconds is >= 10 and <= 120 &&
+                    options.QueryTimeoutSeconds is >= 1 and <= 60,
+                "Project intelligence watcher or timeout settings are invalid.")
+            .ValidateOnStart();
+
         services.AddSingleton(static _ => JarvisDataPaths.Create());
         services.AddSingleton<LocalAssetPaths>();
         services.AddSingleton<ILoopbackHttpClientFactory, LoopbackHttpClientFactory>();
@@ -151,6 +172,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<
             IToolExecutor<ExecuteSafeCommandRequest, ExecuteSafeCommandResponse>,
             ExecuteSafeCommandTool>();
+        services.AddSingleton<SafeRepositoryDiscovery>();
+        services.AddSingleton<RoslynProjectAnalyzer>();
+        services.AddSingleton<SqliteProjectIndexStore>();
+        services.AddSingleton<IGitRepositoryMetadataReader, GitRepositoryMetadataReader>();
+        services.AddSingleton<ProjectWatchManager>();
+        services.AddSingleton<ProjectIntelligenceService>();
+        services.AddSingleton<IProjectIntelligenceService>(static provider =>
+            provider.GetRequiredService<ProjectIntelligenceService>());
+        services.AddSingleton(static provider => new ProjectToolExecutors(
+            new Lazy<IProjectIntelligenceService>(
+                () => provider.GetRequiredService<IProjectIntelligenceService>())));
         services.AddSingleton<ToolRegistry>();
         services.AddSingleton<IToolCatalog>(static provider =>
             provider.GetRequiredService<ToolRegistry>());

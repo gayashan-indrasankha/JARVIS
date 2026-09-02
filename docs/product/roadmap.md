@@ -38,7 +38,7 @@ Exit requires the automated gates plus the wake-word matrix on target hardware. 
 - benchmark alternative local ASR profiles for accents and noisy rooms;
 - evaluate WASAPI and reliable local echo cancellation without weakening barge-in.
 
-## 0.2 — Permission-controlled local computer agent (current)
+## 0.2 — Permission-controlled local computer agent (complete)
 
 - strongly typed tool descriptions, requests, results, cancellation, and timeouts;
 - exact trusted catalog, closed JSON schemas, validation before centralized authorization, and authorization before execution;
@@ -49,21 +49,32 @@ Exit requires the automated gates plus the wake-word matrix on target hardware. 
 
 The originally planned harmless-kernel and Windows-adapter milestones are combined for the required acceptance demonstrations; [ADR 0004](../decisions/0004-permission-controlled-local-tool-kernel.md) records the constrained boundary. Exit requires automated gates plus the [manual tool smoke test](../testing/manual-tool-smoke-test.md). Real window opening and local-model selection remain manual until executed on the target desktop.
 
-## 0.3 — Approval surface and controlled mutation
+## 0.3 — Fully local Project Intelligence (current)
+
+- approved-root direct Git repository, `.sln`/`.slnx`, `.csproj`, source, and test discovery;
+- static non-evaluating project metadata loading plus an in-memory Roslyn workspace;
+- namespace/type/member, inheritance/interface/call, endpoint, DI, authentication, EF Core, project/package, test, and Git facts where statically observable;
+- incremental SHA-256 snapshots, SQLite metadata/FTS5 index under `JARVIS_HOME`, and debounced file watching;
+- eleven typed ProjectTools through the existing validation/authorization/audit boundary;
+- exact-symbol/Roslyn/FTS evidence retrieval with a bounded 4B-model context and project-fact/inference/general-knowledge labels;
+- no repository execution, package restore, source generator execution, cloud upload, vector database, or whole-repository prompt.
+
+[ADR 0005](../decisions/0005-local-project-intelligence-index.md) records why Project Intelligence moved ahead of controlled mutation and why `MSBuildWorkspace` is not used for untrusted repositories. Exit requires automated gates plus the [manual Project Intelligence smoke test](../testing/manual-project-intelligence-smoke-test.md) with an installed local model and a disposable real repository.
+
+## 0.4 — Approval surface and controlled mutation
 
 - explicit and strong confirmation UI with exact-request grants and expiry;
 - durable tamper-resistant audit storage, review, retention, and privacy controls;
 - carefully scoped file writes/changes and additional process/application actions with preview/rollback where practical;
 - no general administrator shell; destructive capabilities require separate decisions and safe test strategies.
 
-## 0.4 — Project intelligence
+## 0.5 — Tutor/interviewer and deeper Project Intelligence
 
-- repository discovery within user-approved roots;
-- local metadata/text indexes and Roslyn C# symbol/dependency analysis;
-- evidence-ranked context retrieval and grounded file/symbol explanations;
-- technical tutoring and project-specific interview generation/evaluation.
+- grounded technical tutoring and project-specific interview generation/evaluation;
+- richer cross-project flow analysis and measured local retrieval/answer quality;
+- optional local semantic retrieval only after a concrete benchmark justifies embeddings.
 
-## 0.5 — Memory, desktop understanding, and proactive events
+## 0.6 — Memory, desktop understanding, and proactive events
 
 - explicit memory categories, provenance, retention, correction, and deletion;
 - consent-based screen/window understanding and Windows UI automation;

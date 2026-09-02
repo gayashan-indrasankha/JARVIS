@@ -25,6 +25,8 @@ internal sealed class ToolPathPolicy
             "credentials",
             "credential",
             "secrets",
+            ".secrets",
+            "usersecrets",
         ],
         StringComparer.OrdinalIgnoreCase);
 
@@ -142,6 +144,30 @@ internal sealed class ToolPathPolicy
 
         EnsureNoReparsePoints(repository, metadata);
         return repository;
+    }
+
+    public string NormalizeProjectRepository(string path)
+    {
+        string directory = NormalizeExistingDirectory(path);
+        string containingRoot = _roots.First(root => IsWithinRoot(root, directory));
+        for (DirectoryInfo? candidate = new(directory);
+            candidate is not null && IsWithinRoot(containingRoot, candidate.FullName);
+            candidate = candidate.Parent)
+        {
+            string metadata = Path.Combine(candidate.FullName, ".git");
+            if (File.Exists(metadata))
+            {
+                throw new ToolValidationException("git_indirection_denied");
+            }
+
+            if (Directory.Exists(metadata))
+            {
+                EnsureNoReparsePoints(containingRoot, metadata);
+                return candidate.FullName;
+            }
+        }
+
+        throw new ToolValidationException("not_git_repository");
     }
 
     public static bool IsSensitiveEntry(string path)

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Jarvis.Core.Tools;
 using Jarvis.Infrastructure.Configuration;
+using Jarvis.Infrastructure.ProjectIntelligence;
 using Microsoft.Extensions.Options;
 
 namespace Jarvis.Infrastructure.Tools;
@@ -88,13 +89,17 @@ internal sealed class ToolRegistry : IToolCatalog
         IToolExecutor<ListProcessesRequest, ListProcessesResponse> listProcesses,
         IToolExecutor<GetSystemMetricsRequest, GetSystemMetricsResponse> getSystemMetrics,
         IToolExecutor<GetGitStatusRequest, GetGitStatusResponse> getGitStatus,
-        IToolExecutor<ExecuteSafeCommandRequest, ExecuteSafeCommandResponse> executeSafeCommand)
+        IToolExecutor<ExecuteSafeCommandRequest, ExecuteSafeCommandResponse> executeSafeCommand,
+        IOptions<ProjectIntelligenceOptions> projectOptions,
+        ProjectToolExecutors projectTools)
     {
         int resultLimit = Math.Min(
             options.Value.MaximumResultCharacters,
             ToolDataLimits.MaximumObservationCharacters);
         TimeSpan readTimeout = TimeSpan.FromSeconds(options.Value.DefaultTimeoutSeconds);
         TimeSpan actionTimeout = TimeSpan.FromSeconds(options.Value.DefaultTimeoutSeconds);
+        TimeSpan projectIndexTimeout = TimeSpan.FromSeconds(projectOptions.Value.IndexTimeoutSeconds);
+        TimeSpan projectQueryTimeout = TimeSpan.FromSeconds(projectOptions.Value.QueryTimeoutSeconds);
         IRegisteredTool[] tools =
         [
             Register(
@@ -204,6 +209,130 @@ internal sealed class ToolRegistry : IToolCatalog
                 actionTimeout,
                 executeSafeCommand,
                 ValidateSafeCommand),
+            Register(
+                "analyze_project",
+                "Build or incrementally refresh a local C# repository index without evaluating MSBuild, restoring packages, building, or executing repository code.",
+                ProjectToolSchemas.RepositoryOnly,
+                ToolAuthorizationCategory.SafeLocalAction,
+                projectIndexTimeout,
+                (IToolExecutor<AnalyzeProjectRequest, AnalyzeProjectResponse>)projectTools,
+                request => request with { RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath) }),
+            Register(
+                "get_project_overview",
+                "Return a bounded evidence-grounded overview from a previously analyzed local repository.",
+                ProjectToolSchemas.RepositoryOnly,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<GetProjectOverviewRequest, ProjectAnswerResponse>)projectTools,
+                request => request with { RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath) }),
+            Register(
+                "search_project",
+                "Search the local project index using exact symbols before bounded SQLite FTS evidence retrieval.",
+                ProjectToolSchemas.Search,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<SearchProjectRequest, ProjectAnswerResponse>)projectTools,
+                request => request with
+                {
+                    RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                    Query = ValidateProjectText(request.Query, 256, "project_query_invalid"),
+                    MaximumResults = ValidateCount(request.MaximumResults, nameof(request.MaximumResults)),
+                }),
+            Register(
+                "find_symbol",
+                "Find exact or qualified C# symbol declarations with file and line evidence.",
+                ProjectToolSchemas.Symbol,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<FindSymbolRequest, ProjectAnswerResponse>)projectTools,
+                request => request with
+                {
+                    RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                    Symbol = ValidateProjectText(request.Symbol, 512, "project_symbol_invalid"),
+                    MaximumResults = ValidateCount(request.MaximumResults, nameof(request.MaximumResults)),
+                }),
+            Register(
+                "explain_symbol",
+                "Return declaration and relationship evidence for one C# symbol from the local index.",
+                ProjectToolSchemas.ExplainSymbol,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<ExplainSymbolRequest, ProjectAnswerResponse>)projectTools,
+                request => request with
+                {
+                    RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                    Symbol = ValidateProjectText(request.Symbol, 512, "project_symbol_invalid"),
+                }),
+            Register(
+                "find_references",
+                "Find bounded Roslyn-derived references, calls, inheritance, and implementations for a symbol.",
+                ProjectToolSchemas.Symbol,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<FindReferencesRequest, ProjectAnswerResponse>)projectTools,
+                request => request with
+                {
+                    RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                    Symbol = ValidateProjectText(request.Symbol, 512, "project_symbol_invalid"),
+                    MaximumResults = ValidateCount(request.MaximumResults, nameof(request.MaximumResults)),
+                }),
+            Register(
+                "trace_dependency",
+                "Trace a bounded local C# dependency path from a source symbol toward an optional target symbol.",
+                ProjectToolSchemas.TraceDependency,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<TraceDependencyRequest, ProjectAnswerResponse>)projectTools,
+                request => request with
+                {
+                    RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                    SourceSymbol = ValidateProjectText(request.SourceSymbol, 512, "project_symbol_invalid"),
+                    TargetSymbol = request.TargetSymbol is null
+                        ? null
+                        : ValidateProjectText(request.TargetSymbol, 512, "project_symbol_invalid"),
+                    MaximumDepth = ValidateDepth(request.MaximumDepth),
+                }),
+            Register(
+                "trace_request_flow",
+                "Trace bounded endpoint-to-code relationships using local endpoint and Roslyn evidence.",
+                ProjectToolSchemas.TraceRequestFlow,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<TraceRequestFlowRequest, ProjectAnswerResponse>)projectTools,
+                request => request with
+                {
+                    RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                    Endpoint = ValidateProjectText(request.Endpoint, 512, "project_endpoint_invalid"),
+                    MaximumDepth = ValidateDepth(request.MaximumDepth),
+                }),
+            Register(
+                "list_api_endpoints",
+                "List statically discovered controller and minimal-API endpoints with exact local evidence.",
+                ProjectToolSchemas.ListEndpoints,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<ListApiEndpointsRequest, ProjectAnswerResponse>)projectTools,
+                request => request with
+                {
+                    RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath),
+                    MaximumResults = ValidateCount(request.MaximumResults, nameof(request.MaximumResults)),
+                }),
+            Register(
+                "list_project_dependencies",
+                "List statically parsed project and package references without restoring or executing the repository.",
+                ProjectToolSchemas.RepositoryOnly,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<ListProjectDependenciesRequest, ProjectAnswerResponse>)projectTools,
+                request => request with { RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath) }),
+            Register(
+                "explain_architecture",
+                "Return bounded project, reference, controller, DI, EF Core, and test evidence for local architecture reasoning.",
+                ProjectToolSchemas.RepositoryOnly,
+                ToolAuthorizationCategory.SafeRead,
+                projectQueryTimeout,
+                (IToolExecutor<ExplainArchitectureRequest, ProjectAnswerResponse>)projectTools,
+                request => request with { RepositoryPath = pathPolicy.NormalizeProjectRepository(request.RepositoryPath) }),
         ];
 
         _registrations = tools.ToDictionary(
@@ -288,5 +417,25 @@ internal sealed class ToolRegistry : IToolCatalog
         }
 
         return request;
+    }
+
+    private static int ValidateDepth(int depth)
+    {
+        if (depth is < 1 or > 8)
+        {
+            throw new ToolValidationException("project_depth_out_of_range");
+        }
+
+        return depth;
+    }
+
+    private static string ValidateProjectText(string value, int maximumLength, string code)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > maximumLength || value.Any(char.IsControl))
+        {
+            throw new ToolValidationException(code);
+        }
+
+        return value.Trim();
     }
 }

@@ -27,5 +27,8 @@ public sealed class CoreDependencyTests
                 reference.StartsWith("SherpaOnnx", StringComparison.Ordinal) ||
                 reference.StartsWith("System.Net.Http", StringComparison.Ordinal) ||
                 reference.StartsWith("Microsoft.Data.Sqlite", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            referencedAssemblies,
+            static reference => reference.StartsWith("Microsoft.CodeAnalysis", StringComparison.Ordinal));
     }
 }

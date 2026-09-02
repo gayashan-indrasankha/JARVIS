@@ -1,6 +1,6 @@
 # Third-party runtime and model licenses
 
-This is the version 0.2 engineering inventory, not legal advice. JARVIS source control contains no third-party model weight or native runtime. The setup script downloads artifacts directly from their recorded upstream locations for local use. Any installer, redistribution, commercial distribution, or hosted model offering must repeat legal review and preserve the exact license/notice files shipped with the selected versions.
+This is the version 0.3 engineering inventory, not legal advice. JARVIS source control contains no third-party model weight or native runtime. The setup script downloads artifacts directly from their recorded upstream locations for local use. Any installer, redistribution, commercial distribution, or hosted model offering must repeat legal review and preserve the exact license/notice files shipped with the selected versions.
 
 | Component | Selected artifact | Upstream terms/provenance | Repository obligation |
 | --- | --- | --- | --- |
@@ -15,6 +15,9 @@ This is the version 0.2 engineering inventory, not legal advice. JARVIS source c
 | Kokoro model and English voices | `kokoro-en-v0_19` | [Kokoro-82M Apache-2.0](https://huggingface.co/hexgrad/Kokoro-82M); upstream [voice provenance](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md); sherpa's archive includes its own `LICENSE` | Preserve the archive license and voice provenance. Review the selected voice data terms again before redistribution; the current project makes no broader rights claim. |
 | eSpeak NG phonemizer data | `espeak-ng-data` inside the Kokoro archive | [GPL-3.0](https://github.com/espeak-ng/espeak-ng/blob/master/COPYING) | Redistribution must satisfy GPL-3.0 for this component, including license/source obligations as applicable. The current source repository does not redistribute it. |
 | NAudio | `NAudio.WinMM` 3.0.1 and transitive NAudio packages | [MIT](https://github.com/naudio/NAudio/blob/v3.0.1/LICENSE) | Preserve the MIT notice when redistributing binaries. |
+| Roslyn | `Microsoft.CodeAnalysis.CSharp.Workspaces` 5.0.0 and transitive compiler/workspace packages | [.NET Roslyn MIT](https://github.com/dotnet/roslyn/blob/main/License.txt); [NuGet package provenance](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp.Workspaces/5.0.0) | Preserve the Microsoft MIT notice and the exact NuGet package third-party notices when redistributing. JARVIS uses parsing/workspaces only and does not redistribute a compiler separately. |
+| Microsoft.Data.Sqlite | `Microsoft.Data.Sqlite` 10.0.11 and SQLitePCLRaw transitive packages | [.NET/EF Core MIT](https://github.com/dotnet/efcore/blob/main/LICENSE.txt); [NuGet package provenance](https://www.nuget.org/packages/Microsoft.Data.Sqlite/10.0.11) | Preserve the Microsoft MIT and transitive SQLitePCLRaw notices from the published dependency set. |
+| SQLite engine / FTS5 | native SQLite delivered transitively by the selected SQLitePCLRaw bundle | [SQLite public-domain dedication](https://www.sqlite.org/copyright.html) | SQLite requests no license notice, but packaging must still inventory the exact native bundle and SQLitePCLRaw wrapper terms. |
 | .NET and Microsoft.Extensions | .NET 10 / Microsoft.Extensions 10.0.0 | [.NET runtime MIT](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT) plus third-party notices | Preserve the SDK/runtime and package notices required by the chosen deployment mode. |
 
 ## Quality-gate rules

@@ -16,6 +16,8 @@ public sealed class VoiceOptionsValidationTests
         LocalAiOptions localAi = provider.GetRequiredService<IOptions<LocalAiOptions>>().Value;
         VoiceOptions voice = provider.GetRequiredService<IOptions<VoiceOptions>>().Value;
         ToolOptions tools = provider.GetRequiredService<IOptions<ToolOptions>>().Value;
+        ProjectIntelligenceOptions projects = provider
+            .GetRequiredService<IOptions<ProjectIntelligenceOptions>>().Value;
 
         Assert.True(localAi.Enabled);
         Assert.Equal("127.0.0.1", localAi.Host);
@@ -24,6 +26,8 @@ public sealed class VoiceOptionsValidationTests
         Assert.Equal("Jarvis", voice.WakeWord.Phrase);
         Assert.True(tools.Enabled);
         Assert.Empty(tools.AllowedRoots);
+        Assert.True(projects.Enabled);
+        Assert.Equal(8_192, projects.MaximumContextCharacters);
     }
 
     [Theory]
@@ -58,6 +62,11 @@ public sealed class VoiceOptionsValidationTests
     [InlineData("Tools:MaximumResultCharacters", "100")]
     [InlineData("Tools:DefaultTimeoutSeconds", "0")]
     [InlineData("Tools:AllowedRoots:0", "relative/path")]
+    [InlineData("ProjectIntelligence:MaximumFiles", "0")]
+    [InlineData("ProjectIntelligence:MaximumTotalTextBytes", "100")]
+    [InlineData("ProjectIntelligence:MaximumContextCharacters", "100")]
+    [InlineData("ProjectIntelligence:WatchDebounceMilliseconds", "10")]
+    [InlineData("ProjectIntelligence:IndexTimeoutSeconds", "121")]
     [InlineData("Jarvis:InstanceName", "unsafe instance\nname")]
     public void InvalidResourceConfigurationFailsValidation(string key, string value)
     {
@@ -77,6 +86,10 @@ public sealed class VoiceOptionsValidationTests
             else if (key.StartsWith("Tools:", StringComparison.Ordinal))
             {
                 _ = provider.GetRequiredService<IOptions<ToolOptions>>().Value;
+            }
+            else if (key.StartsWith("ProjectIntelligence:", StringComparison.Ordinal))
+            {
+                _ = provider.GetRequiredService<IOptions<ProjectIntelligenceOptions>>().Value;
             }
             else
             {
