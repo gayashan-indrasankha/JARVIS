@@ -59,6 +59,8 @@ The single local database is `%LOCALAPPDATA%\JARVIS\Data\ProjectIntelligence\pro
 
 Each file records repository-relative path, kind, length, UTC modification ticks, SHA-256 content hash, and text. An unchanged length/timestamp reuses the prior content/hash. Added/changed files are read and hashed; removed files disappear in the next atomic transaction. A changed snapshot rebuilds the cross-file semantic graph to avoid stale relationships. A no-change refresh skips Roslyn and updates Git metadata only.
 
+Before returning any evidence, retrieval validates the indexed row against the snapshot file metadata, normalizes the current path through the approved-root/reparse policy, and recomputes the current file's SHA-256 content hash. A same-length edit with a restored timestamp therefore fails as `project_index_stale` instead of returning obsolete evidence. Hashes are cached only for the duration of that bounded query.
+
 After a successful authorized analysis, one bounded `FileSystemWatcher` per repository (maximum eight by default) observes changes. A capacity-one signal and 750 ms debounce coalesce bursts. Refreshes share one async index lock, are cancellable at shutdown, and use no retry storm. Watcher overflow requests one full refresh; failures log only repository ID and sanitized category.
 
 Git branch/status uses the same direct, fully resolved Git executable and bounded non-interactive environment as `get_git_status`. It pins `--git-dir`/`--work-tree`, disables prompts/global/system configuration, ignores submodules, and executes no repository-selected arguments.
@@ -76,6 +78,8 @@ Retrieval order is:
 There is no vector database or embedding service in 0.3. An embedding abstraction is intentionally deferred until a local benchmark demonstrates a retrieval gap that lexical/symbol search cannot solve.
 
 The default evidence-content budget is 8,192 characters with 1,500 characters per excerpt. Budget accounting includes conservative per-claim serialization overhead so the complete JSON observation stays below the broker's 16,384-character default result cap. Queries load only snapshot and file metadata before running their bounded evidence query; they do not materialize every stored source file. Every response reports used characters, approximate four-characters-per-token count, evidence count, candidate count, retrieval milliseconds, and whether evidence was truncated. File results calculate one-based supporting lines from the actual indexed text. Evidence includes repository-relative path, start/end line, symbol when known, excerpt, content hash, and snapshot ID. The entire repository is never sent to Qwen.
+
+Dependency and request-flow tools traverse the stored relationship graph breadth-first with a visited set, explicit depth limit, and candidate cap. Endpoint traversal starts only from discovered endpoint evidence. Roslyn relationship extraction groups declarations by source file rather than rescanning the complete symbol map for every document, keeping the relationship pass proportional to relevant declarations plus invocations.
 
 Answer claims use exactly these meanings:
 
@@ -111,6 +115,6 @@ Structured project metrics contain only a one-way repository identifier, initial
 
 ## Verification and limitations
 
-The synthetic fixture is copied to temporary directories and is never built. Tests cover initial/incremental indexing, exact evidence lines, symbol/implementation/call extraction, endpoints, DI/authentication/EF/package/test clues, FTS5, context limits, generated/credential exclusions, hostile DTDs, inert MSBuild `Exec` targets, cancellation, watcher debounce, closed schemas, categories, and regression boundaries. They require no network, model, microphone, GPU, real user repository, or destructive machine action.
+The synthetic fixture is copied to temporary directories and is never built. Tests cover initial/incremental indexing, exact evidence lines and current-content hashes, multi-hop request flow, symbol/implementation/call extraction, endpoints, DI/authentication/EF/package/test clues, FTS5, context limits, generated/credential exclusions, hostile DTDs, inert MSBuild `Exec` targets, cancellation, disabled configuration, watcher debounce/failure containment, closed schemas, categories, and regression boundaries. They require no network, model, microphone, GPU, real user repository, or destructive machine action.
 
 Manual validation remains required for local-model tool selection, answer usefulness, a real repository with unresolved dependencies/conditional projects, physical voice, and latency measurements. See [the manual Project Intelligence smoke test](../testing/manual-project-intelligence-smoke-test.md).

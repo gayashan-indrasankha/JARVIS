@@ -185,7 +185,6 @@ public sealed partial class RealtimeVoiceCoordinator
                 return true;
             }
 
-            SetState(VoiceSessionState.Listening);
             if (configuration.ActivationMode == VoiceActivationMode.VoiceActivityDetection)
             {
                 StartCapturePump(
@@ -197,6 +196,7 @@ public sealed partial class RealtimeVoiceCoordinator
             _metrics.Record(new VoiceMetric(
                 VoiceMetricKind.WakeToListeningLatency,
                 wakeToListening.Elapsed.TotalMilliseconds));
+            SetState(VoiceSessionState.Listening);
             RefreshContinuationWindowUnsafe();
             StartAcknowledgementUnsafe(configuration);
             return true;

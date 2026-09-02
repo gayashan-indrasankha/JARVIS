@@ -95,10 +95,37 @@ internal sealed class RoslynProjectAnalyzer
         }
 
         List<IndexedRelationship> relationships = [];
+        Dictionary<string, List<SymbolDeclaration>> declarationsByFile =
+            new(StringComparer.OrdinalIgnoreCase);
+        foreach ((ISymbol symbol, List<IndexedSymbol> declarations) in symbolMap)
+        {
+            foreach (IndexedSymbol declaration in declarations)
+            {
+                if (!declarationsByFile.TryGetValue(
+                        declaration.RelativePath,
+                        out List<SymbolDeclaration>? fileDeclarations))
+                {
+                    fileDeclarations = [];
+                    declarationsByFile.Add(declaration.RelativePath, fileDeclarations);
+                }
+
+                fileDeclarations.Add(new SymbolDeclaration(symbol, declaration));
+            }
+        }
+
         foreach (DocumentContext context in documents)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ExtractRelationships(context, symbolMap, relationships, facts, cancellationToken);
+            declarationsByFile.TryGetValue(
+                context.File.RelativePath,
+                out List<SymbolDeclaration>? fileDeclarations);
+            ExtractRelationships(
+                context,
+                fileDeclarations ?? [],
+                symbolMap,
+                relationships,
+                facts,
+                cancellationToken);
         }
 
         return new ProjectAnalysisSnapshot(
@@ -412,21 +439,18 @@ internal sealed class RoslynProjectAnalyzer
 
     private static void ExtractRelationships(
         DocumentContext context,
+        IReadOnlyList<SymbolDeclaration> declarations,
         IReadOnlyDictionary<ISymbol, List<IndexedSymbol>> symbolMap,
         List<IndexedRelationship> relationships,
         List<IndexedFact> facts,
         CancellationToken cancellationToken)
     {
-        foreach ((ISymbol sourceSymbol, List<IndexedSymbol> declarations) in symbolMap)
+        foreach (SymbolDeclaration declaration in declarations)
         {
-            foreach (IndexedSymbol source in declarations.Where(declaration =>
-                declaration.RelativePath.Equals(context.File.RelativePath, StringComparison.OrdinalIgnoreCase)))
+            ISymbol sourceSymbol = declaration.Symbol;
+            IndexedSymbol source = declaration.Indexed;
+            if (sourceSymbol is INamedTypeSymbol type)
             {
-                if (sourceSymbol is not INamedTypeSymbol type)
-                {
-                    continue;
-                }
-
                 if (type.BaseType is { SpecialType: not SpecialType.System_Object } baseType)
                 {
                     AddRelationship(source, baseType, ProjectRelationshipKind.Inherits, source.StartLine, source.EndLine);
@@ -435,6 +459,31 @@ internal sealed class RoslynProjectAnalyzer
                 foreach (INamedTypeSymbol @interface in type.Interfaces)
                 {
                     AddRelationship(source, @interface, ProjectRelationshipKind.Implements, source.StartLine, source.EndLine);
+                }
+            }
+
+            if (sourceSymbol is IMethodSymbol method && method.ContainingType is not null)
+            {
+                foreach (INamedTypeSymbol @interface in method.ContainingType.AllInterfaces)
+                {
+                    foreach (IMethodSymbol interfaceMethod in
+                        @interface.GetMembers(method.Name).OfType<IMethodSymbol>())
+                    {
+                        ISymbol? implementation = method.ContainingType.FindImplementationForInterfaceMember(
+                            interfaceMethod);
+                        if (implementation is not null &&
+                            SymbolEqualityComparer.Default.Equals(
+                                implementation.OriginalDefinition,
+                                method.OriginalDefinition))
+                        {
+                            AddRelationship(
+                                source,
+                                interfaceMethod,
+                                ProjectRelationshipKind.Implements,
+                                source.StartLine,
+                                source.EndLine);
+                        }
+                    }
                 }
             }
         }
@@ -452,11 +501,8 @@ internal sealed class RoslynProjectAnalyzer
                 context.File.RelativePath);
             FileLinePositionSpan span = invocation.GetLocation().GetLineSpan();
             int invocationLine = span.StartLinePosition.Line + 1;
-            source ??= symbolMap.Values.SelectMany(static declarations => declarations)
-                .Where(symbol => symbol.RelativePath.Equals(
-                        context.File.RelativePath,
-                        StringComparison.OrdinalIgnoreCase) &&
-                    symbol.StartLine <= invocationLine && symbol.EndLine >= invocationLine &&
+            source ??= declarations.Select(static declaration => declaration.Indexed)
+                .Where(symbol => symbol.StartLine <= invocationLine && symbol.EndLine >= invocationLine &&
                     symbol.Kind is ProjectSymbolKind.Method or ProjectSymbolKind.Constructor or
                         ProjectSymbolKind.Property)
                 .OrderBy(static symbol => symbol.EndLine - symbol.StartLine)
@@ -831,4 +877,6 @@ internal sealed class RoslynProjectAnalyzer
         SyntaxNode Root,
         SemanticModel SemanticModel,
         IndexedFile File);
+
+    private sealed record SymbolDeclaration(ISymbol Symbol, IndexedSymbol Indexed);
 }
