@@ -109,6 +109,13 @@ internal sealed class ProjectToolExecutors(Lazy<IProjectIntelligenceService>? se
         {
             throw new ToolValidationException("project_index_storage_failed");
         }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException and not OutOfMemoryException and
+                not StackOverflowException and not AccessViolationException and
+                not System.Runtime.InteropServices.SEHException)
+        {
+            throw new ToolValidationException("project_analysis_failed");
+        }
     }
 
     private IProjectIntelligenceService Service => service?.Value ??

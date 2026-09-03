@@ -119,6 +119,29 @@ public sealed class ProjectIntelligenceTests
     }
 
     [Fact]
+    public async Task RequestFlowTraversesInterfaceImplementationToDatabaseCalls()
+    {
+        await using ProjectRig rig = await ProjectRig.CreateAsync();
+        await rig.Service.AnalyzeAsync(rig.RepositoryPath, CancellationToken.None);
+
+        GroundedProjectAnswer shallow = await rig.Service.TraceRequestFlowAsync(
+            rig.RepositoryPath,
+            "POST /api/orders",
+            1,
+            CancellationToken.None);
+        GroundedProjectAnswer deep = await rig.Service.TraceRequestFlowAsync(
+            rig.RepositoryPath,
+            "POST /api/orders",
+            6,
+            CancellationToken.None);
+
+        Assert.DoesNotContain(shallow.Claims, claim =>
+            claim.Statement.Contains("SaveChangesAsync", StringComparison.Ordinal));
+        Assert.Contains(deep.Claims, claim =>
+            claim.Statement.Contains("SaveChangesAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SearchUsesFtsAndReturnsTheActualSupportingLine()
     {
         await using ProjectRig rig = await ProjectRig.CreateAsync();
@@ -373,6 +396,54 @@ public sealed class ProjectIntelligenceTests
     }
 
     [Fact]
+    public async Task QueryRejectsSameLengthEvidenceChangeWithRestoredTimestamp()
+    {
+        await using ProjectRig rig = await ProjectRig.CreateAsync();
+        await rig.Service.AnalyzeAsync(rig.RepositoryPath, CancellationToken.None);
+        string sourcePath = Path.Combine(
+            rig.RepositoryPath,
+            "src",
+            "Sample.Api",
+            "Controllers",
+            "OrdersController.cs");
+        FileInfo originalInfo = new(sourcePath);
+        long originalLength = originalInfo.Length;
+        DateTime originalTimestamp = originalInfo.LastWriteTimeUtc;
+        string original = await File.ReadAllTextAsync(sourcePath);
+        string changed = original.Replace("CreateAsync", "DeleteAsync", StringComparison.Ordinal);
+        Assert.NotEqual(original, changed);
+        await File.WriteAllTextAsync(sourcePath, changed);
+        File.SetLastWriteTimeUtc(sourcePath, originalTimestamp);
+        FileInfo changedInfo = new(sourcePath);
+        changedInfo.Refresh();
+        Assert.Equal(originalLength, changedInfo.Length);
+        Assert.Equal(originalTimestamp.Ticks, changedInfo.LastWriteTimeUtc.Ticks);
+
+        ProjectIndexException exception = await Assert.ThrowsAsync<ProjectIndexException>(async () =>
+            await rig.Service.FindSymbolAsync(
+                rig.RepositoryPath,
+                "OrdersController",
+                10,
+                CancellationToken.None));
+
+        Assert.Equal("project_index_stale", exception.Code);
+    }
+
+    [Fact]
+    public async Task DisabledProjectIntelligenceRejectsAnalysisAndQueries()
+    {
+        await using ProjectRig rig = await ProjectRig.CreateAsync(enabled: false);
+
+        ProjectIndexException analysis = await Assert.ThrowsAsync<ProjectIndexException>(async () =>
+            await rig.Service.AnalyzeAsync(rig.RepositoryPath, CancellationToken.None));
+        ProjectIndexException query = await Assert.ThrowsAsync<ProjectIndexException>(async () =>
+            await rig.Service.GetOverviewAsync(rig.RepositoryPath, CancellationToken.None));
+
+        Assert.Equal("project_intelligence_disabled", analysis.Code);
+        Assert.Equal("project_intelligence_disabled", query.Code);
+    }
+
+    [Fact]
     public async Task WatcherDebouncesBurstIntoOneRefresh()
     {
         string root = Path.Combine(Path.GetTempPath(), "JarvisWatcherTests", Guid.NewGuid().ToString("N"));
@@ -414,6 +485,58 @@ public sealed class ProjectIntelligenceTests
         }
     }
 
+    [Fact]
+    public async Task WatcherContainsUnexpectedRefreshFailure()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JarvisWatcherTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        TaskCompletionSource refreshStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ProjectWatchManager manager = new(
+            Options.Create(new ProjectIntelligenceOptions
+            {
+                WatchDebounceMilliseconds = 100,
+                MaximumWatchedRepositories = 1,
+            }),
+            NullLogger<ProjectWatchManager>.Instance);
+        try
+        {
+            manager.EnsureWatching(
+                root,
+                "TEST",
+                _ =>
+                {
+                    refreshStarted.TrySetResult();
+                    return ValueTask.FromException(new ArgumentException("untrusted project metadata"));
+                });
+            await File.WriteAllTextAsync(Path.Combine(root, "changed.cs"), "one");
+
+            await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(150);
+            await manager.DisposeAsync();
+        }
+        finally
+        {
+            await manager.DisposeAsync();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ProjectToolExecutorSanitizesUnexpectedRepositoryFailure()
+    {
+        ProjectToolExecutors executors = new(
+            new Lazy<IProjectIntelligenceService>(static () =>
+                new ThrowingProjectIntelligenceService()));
+        IToolExecutor<AnalyzeProjectRequest, AnalyzeProjectResponse> executor = executors;
+
+        ToolValidationException exception = await Assert.ThrowsAsync<ToolValidationException>(async () =>
+            await executor.ExecuteAsync(
+                new AnalyzeProjectRequest("C:\\approved\\repository"),
+                CancellationToken.None));
+
+        Assert.Equal("project_analysis_failed", exception.Code);
+    }
+
     private sealed class ProjectRig : IAsyncDisposable
     {
         private readonly SqliteProjectIndexStore _store;
@@ -440,7 +563,7 @@ public sealed class ProjectIntelligenceTests
 
         public ProjectIntelligenceService Service { get; }
 
-        public static async ValueTask<ProjectRig> CreateAsync()
+        public static async ValueTask<ProjectRig> CreateAsync(bool enabled = true)
         {
             string root = Path.Combine(
                 Directory.GetCurrentDirectory(),
@@ -467,6 +590,7 @@ public sealed class ProjectIntelligenceTests
             IOptions<ProjectIntelligenceOptions> projectOptions = Options.Create(
                 new ProjectIntelligenceOptions
                 {
+                    Enabled = enabled,
                     WatchDebounceMilliseconds = 30_000,
                     MaximumContextCharacters = 8_192,
                     MaximumExcerptCharacters = 1_024,
@@ -534,5 +658,68 @@ public sealed class ProjectIntelligenceTests
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new GitRepositoryMetadata("main", "## main"));
         }
+    }
+
+    private sealed class ThrowingProjectIntelligenceService : IProjectIntelligenceService
+    {
+        public ValueTask<ProjectIndexReport> AnalyzeAsync(
+            string repositoryPath,
+            CancellationToken cancellationToken) => Fail<ProjectIndexReport>();
+
+        public ValueTask<GroundedProjectAnswer> GetOverviewAsync(
+            string repositoryPath,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> SearchAsync(
+            string repositoryPath,
+            string query,
+            int maximumResults,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> FindSymbolAsync(
+            string repositoryPath,
+            string symbol,
+            int maximumResults,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> ExplainSymbolAsync(
+            string repositoryPath,
+            string symbol,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> FindReferencesAsync(
+            string repositoryPath,
+            string symbol,
+            int maximumResults,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> TraceDependencyAsync(
+            string repositoryPath,
+            string sourceSymbol,
+            string? targetSymbol,
+            int maximumDepth,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> TraceRequestFlowAsync(
+            string repositoryPath,
+            string endpoint,
+            int maximumDepth,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> ListApiEndpointsAsync(
+            string repositoryPath,
+            int maximumResults,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> ListDependenciesAsync(
+            string repositoryPath,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        public ValueTask<GroundedProjectAnswer> ExplainArchitectureAsync(
+            string repositoryPath,
+            CancellationToken cancellationToken) => Fail<GroundedProjectAnswer>();
+
+        private static ValueTask<T> Fail<T>() =>
+            ValueTask.FromException<T>(new ArgumentException("private repository detail"));
     }
 }

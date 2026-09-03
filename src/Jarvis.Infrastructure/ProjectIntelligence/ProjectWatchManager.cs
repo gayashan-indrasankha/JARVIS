@@ -159,8 +159,9 @@ internal sealed class ProjectWatchManager(
                     throw;
                 }
                 catch (Exception exception) when (
-                    exception is IOException or UnauthorizedAccessException or InvalidOperationException or
-                        ProjectIndexException or SqliteException or ToolValidationException)
+                    exception is not OperationCanceledException and not OutOfMemoryException and
+                        not StackOverflowException and not AccessViolationException and
+                        not System.Runtime.InteropServices.SEHException)
                 {
                     ProjectIntelligenceLog.RefreshFailed(
                         _logger,
@@ -171,7 +172,8 @@ internal sealed class ProjectWatchManager(
                             SqliteException => "project_index_storage_failed",
                             ToolValidationException validation => validation.Code,
                             InvalidOperationException => "project_refresh_invalid",
-                            _ => "io_failure",
+                            IOException or UnauthorizedAccessException => "io_failure",
+                            _ => "project_refresh_failed",
                         });
                 }
             }

@@ -38,6 +38,7 @@ internal sealed class ProjectIntelligenceService(
     {
         QueryContext context = await GetQueryContextAsync(repositoryPath, cancellationToken)
             .ConfigureAwait(false);
+        Stopwatch stopwatch = Stopwatch.StartNew();
         List<ProjectSearchRow> rows = [];
         foreach (string kind in new[] { "repository_documentation", "solution", "project", "test_project", "controller", "endpoint", "db_context", "database", "authentication" })
         {
@@ -51,7 +52,13 @@ internal sealed class ProjectIntelligenceService(
                 .ConfigureAwait(false));
         }
 
-        return BuildAnswer(context, rows, "Project overview evidence", includeInference: true);
+        stopwatch.Stop();
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            "Project overview evidence",
+            cancellationToken,
+            includeInference: true).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> SearchAsync(
@@ -76,7 +83,11 @@ internal sealed class ProjectIntelligenceService(
         }
 
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, "Project search evidence");
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            "Project search evidence",
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> FindSymbolAsync(
@@ -94,7 +105,11 @@ internal sealed class ProjectIntelligenceService(
             maximumResults,
             cancellationToken).ConfigureAwait(false);
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, $"Declarations matching {symbol}");
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            $"Declarations matching {symbol}",
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> ExplainSymbolAsync(
@@ -111,7 +126,11 @@ internal sealed class ProjectIntelligenceService(
         rows.AddRange(await store.FindRelationshipsAsync(context.RepositoryId, symbol, 24, cancellationToken)
             .ConfigureAwait(false));
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, $"Symbol evidence for {symbol}");
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            $"Symbol evidence for {symbol}",
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> FindReferencesAsync(
@@ -129,7 +148,11 @@ internal sealed class ProjectIntelligenceService(
             maximumResults,
             cancellationToken).ConfigureAwait(false);
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, $"References involving {symbol}");
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            $"References involving {symbol}",
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> TraceDependencyAsync(
@@ -177,7 +200,11 @@ internal sealed class ProjectIntelligenceService(
         }
 
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, $"Dependency trace from {sourceSymbol}");
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            $"Dependency trace from {sourceSymbol}",
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> TraceRequestFlowAsync(
@@ -199,23 +226,51 @@ internal sealed class ProjectIntelligenceService(
             .Take(8)
             .ToArray();
         List<ProjectSearchRow> rows = [.. matches];
+        Queue<(string Symbol, int Depth)> queue = new();
         foreach (ProjectSearchRow match in matches)
         {
-            if (match.Symbol is null)
+            if (!string.IsNullOrWhiteSpace(match.Symbol))
+            {
+                queue.Enqueue((match.Symbol, 0));
+            }
+        }
+
+        HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
+        while (queue.Count > 0 && rows.Count < 96)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            (string current, int depth) = queue.Dequeue();
+            if (!visited.Add(current) || depth >= maximumDepth)
             {
                 continue;
             }
 
             IReadOnlyList<ProjectSearchRow> relationships = await store.FindRelationshipsAsync(
                 context.RepositoryId,
-                match.Symbol,
-                Math.Min(64, maximumDepth * 12),
+                current,
+                32,
                 cancellationToken).ConfigureAwait(false);
-            rows.AddRange(relationships);
+            foreach (ProjectSearchRow relationship in relationships)
+            {
+                rows.Add(relationship);
+                if (!string.IsNullOrWhiteSpace(relationship.Symbol))
+                {
+                    queue.Enqueue((relationship.Symbol, depth + 1));
+                }
+
+                if (rows.Count >= 96)
+                {
+                    break;
+                }
+            }
         }
 
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, $"Request-flow evidence for {endpoint}");
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            $"Request-flow evidence for {endpoint}",
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> ListApiEndpointsAsync(
@@ -241,7 +296,11 @@ internal sealed class ProjectIntelligenceService(
         rows.AddRange(await store.FindFactsAsync(context.RepositoryId, "package_reference", 128, cancellationToken)
             .ConfigureAwait(false));
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, "Project and package dependencies");
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            "Project and package dependencies",
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<GroundedProjectAnswer> ExplainArchitectureAsync(
@@ -259,11 +318,12 @@ internal sealed class ProjectIntelligenceService(
         }
 
         stopwatch.Stop();
-        return BuildAnswer(
+        return await BuildAnswerAsync(
             context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
             rows,
             "Architecture evidence",
-            includeInference: true);
+            cancellationToken,
+            includeInference: true).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -458,13 +518,22 @@ internal sealed class ProjectIntelligenceService(
             maximumResults,
             cancellationToken).ConfigureAwait(false);
         stopwatch.Stop();
-        return BuildAnswer(context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds }, rows, description);
+        return await BuildAnswerAsync(
+            context with { RetrievalMilliseconds = stopwatch.ElapsedMilliseconds },
+            rows,
+            description,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<QueryContext> GetQueryContextAsync(
         string repositoryPath,
         CancellationToken cancellationToken)
     {
+        if (!_options.Enabled)
+        {
+            throw new ProjectIndexException("project_intelligence_disabled");
+        }
+
         string repository = pathPolicy.NormalizeProjectRepository(repositoryPath);
         string repositoryId = CreateRepositoryId(repository);
         RepositoryQueryState? state = await store.LoadQueryStateAsync(repositoryId, cancellationToken)
@@ -482,20 +551,23 @@ internal sealed class ProjectIntelligenceService(
         return new QueryContext(repositoryId, repository, state.SnapshotId, state.Files, 0);
     }
 
-    private GroundedProjectAnswer BuildAnswer(
+    private async ValueTask<GroundedProjectAnswer> BuildAnswerAsync(
         QueryContext context,
         IReadOnlyList<ProjectSearchRow> candidates,
         string description,
+        CancellationToken cancellationToken,
         bool includeInference = false)
     {
+        Stopwatch evidenceStopwatch = Stopwatch.StartNew();
         int used = 0;
         bool truncated = false;
         List<ProjectClaim> claims = [];
+        Dictionary<string, string> currentHashes = new(StringComparer.OrdinalIgnoreCase);
         foreach (ProjectSearchRow row in candidates
             .DistinctBy(static row => $"{row.RelativePath}|{row.StartLine}|{row.Excerpt}", StringComparer.Ordinal)
             .OrderBy(static row => row.Rank))
         {
-            VerifyEvidenceCurrent(context, row);
+            cancellationToken.ThrowIfCancellationRequested();
             string excerpt = CreateEvidenceExcerpt(row);
             string statement = row.SourceKind switch
             {
@@ -510,6 +582,11 @@ internal sealed class ProjectIntelligenceService(
                 continue;
             }
 
+            await VerifyEvidenceCurrentAsync(
+                context,
+                row,
+                currentHashes,
+                cancellationToken).ConfigureAwait(false);
             used += cost;
             claims.Add(new ProjectClaim(
                 ProjectKnowledgeClassification.ProjectFact,
@@ -542,17 +619,19 @@ internal sealed class ProjectIntelligenceService(
             (used + 3) / 4,
             claims.Sum(static claim => claim.Evidence.Count),
             truncated);
+        evidenceStopwatch.Stop();
+        long retrievalMilliseconds = context.RetrievalMilliseconds + evidenceStopwatch.ElapsedMilliseconds;
         ProjectIntelligenceLog.RetrievalCompleted(
             _logger,
             context.RepositoryId,
-            context.RetrievalMilliseconds,
+            retrievalMilliseconds,
             candidates.Count,
             budget.UsedCharacters,
             budget.EstimatedTokens,
             budget.Truncated);
         return new GroundedProjectAnswer(
             claims,
-            new ProjectQueryMetrics(context.RetrievalMilliseconds, candidates.Count, budget),
+            new ProjectQueryMetrics(retrievalMilliseconds, candidates.Count, budget),
             context.SnapshotId);
     }
 
@@ -594,16 +673,35 @@ internal sealed class ProjectIntelligenceService(
         return Convert.ToHexString(hash.GetHashAndReset())[..32];
     }
 
-    private void VerifyEvidenceCurrent(QueryContext context, ProjectSearchRow row)
+    private async ValueTask VerifyEvidenceCurrentAsync(
+        QueryContext context,
+        ProjectSearchRow row,
+        Dictionary<string, string> currentHashes,
+        CancellationToken cancellationToken)
     {
         if (!context.Files.TryGetValue(row.RelativePath, out StoredFileMetadata? file))
         {
             throw new ProjectIndexException("project_index_stale");
         }
 
-        string candidatePath = Path.GetFullPath(Path.Combine(
-            context.RepositoryPath,
-            row.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!file.ContentHash.Equals(row.ContentHash, StringComparison.Ordinal))
+        {
+            throw new ProjectIndexException("project_index_corrupt");
+        }
+
+        string candidatePath;
+        try
+        {
+            candidatePath = Path.GetFullPath(Path.Combine(
+                context.RepositoryPath,
+                row.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new ProjectIndexException("project_index_corrupt");
+        }
+
         string prefix = Path.TrimEndingDirectorySeparator(context.RepositoryPath) +
             Path.DirectorySeparatorChar;
         if (!candidatePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -621,6 +719,41 @@ internal sealed class ProjectIntelligenceService(
             {
                 throw new ProjectIndexException("project_index_stale");
             }
+
+            if (!currentHashes.TryGetValue(row.RelativePath, out string? currentHash))
+            {
+                DiscoveredFile discovered = new(
+                    fullPath,
+                    row.RelativePath,
+                    IndexedFileKind.Source,
+                    current.Length,
+                    current.LastWriteTimeUtc.Ticks);
+                string currentContent = await SafeRepositoryDiscovery.ReadTextAsync(
+                    discovered,
+                    _options.MaximumSourceFileBytes,
+                    cancellationToken).ConfigureAwait(false);
+                currentHash = Convert.ToHexString(
+                    SHA256.HashData(Encoding.UTF8.GetBytes(currentContent)));
+                current.Refresh();
+                if (!current.Exists || current.Length != file.Length ||
+                    current.LastWriteTimeUtc.Ticks != file.LastWriteUtcTicks)
+                {
+                    throw new ProjectIndexException("project_index_stale");
+                }
+
+                currentHashes.Add(row.RelativePath, currentHash);
+            }
+
+            if (!currentHash.Equals(file.ContentHash, StringComparison.Ordinal))
+            {
+                throw new ProjectIndexException("project_index_stale");
+            }
+        }
+        catch (ProjectIndexException exception) when (
+            exception.Code is "project_file_size_changed" or "project_file_not_text" or
+                "project_file_encoding_invalid")
+        {
+            throw new ProjectIndexException("project_index_stale");
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ToolValidationException)
