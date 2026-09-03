@@ -4,6 +4,9 @@ namespace Jarvis.Core.ProjectLearning;
 
 public sealed class ProjectLearningService : IProjectLearningService, IDisposable
 {
+    private const string TargetedFollowUpRationale =
+        "The answer needs a more evidence-grounded explanation. Re-examine the repository evidence before concluding.";
+
     private static readonly InterviewDimension[] InterviewOrder =
     [
         InterviewDimension.ProjectOverview,
@@ -387,32 +390,38 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
         bool ready = turns.Length >= session.TargetQuestionCount;
         InterviewQuestion? nextQuestion = null;
         string nextAssistantText = evaluation.RequiresTargetedFollowUp && !ready
-            ? $"Let's examine that assumption more closely. {evaluation.Rationale}"
+            ? TargetedFollowUpRationale
             : CreateEvaluationSummary(evaluation);
         if (!ready)
         {
             bool followUp = evaluation.RequiresTargetedFollowUp;
-            InterviewDimension nextDimension = followUp
-                ? question.Dimension
-                : InterviewOrder[turns.Length % InterviewOrder.Length];
-            GroundedProjectAnswer nextEvidence = nextDimension == question.Dimension
-                ? evidenceAnswer
-                : await _evidenceSource.GetInterviewEvidenceAsync(
-                    session.RepositoryPath,
+            if (followUp)
+            {
+                nextQuestion = CreateTargetedFollowUpQuestion(question, turns.Length + 1);
+            }
+            else
+            {
+                InterviewDimension nextDimension = InterviewOrder[turns.Length % InterviewOrder.Length];
+                GroundedProjectAnswer nextEvidence = nextDimension == question.Dimension
+                    ? evidenceAnswer
+                    : await _evidenceSource.GetInterviewEvidenceAsync(
+                        session.RepositoryPath,
+                        nextDimension,
+                        cancellationToken).ConfigureAwait(false);
+                IReadOnlyList<ProjectClaim> nextClaims = SelectClaims(nextEvidence.Claims);
+                EnsureEvidence(nextClaims);
+                nextQuestion = await GenerateQuestionAsync(
+                    session.InterviewDifficulty ?? InterviewDifficulty.Internship,
                     nextDimension,
+                    turns.Length + 1,
+                    isFollowUp: false,
+                    parentQuestionId: null,
+                    [],
+                    nextClaims,
+                    turns.TakeLast(_configuration.MaximumRecentTurns).ToArray(),
                     cancellationToken).ConfigureAwait(false);
-            IReadOnlyList<ProjectClaim> nextClaims = SelectClaims(nextEvidence.Claims);
-            EnsureEvidence(nextClaims);
-            nextQuestion = await GenerateQuestionAsync(
-                session.InterviewDifficulty ?? InterviewDifficulty.Internship,
-                nextDimension,
-                turns.Length + 1,
-                followUp,
-                followUp ? question.QuestionId : null,
-                evaluation.Gaps,
-                nextClaims,
-                turns.TakeLast(_configuration.MaximumRecentTurns).ToArray(),
-                cancellationToken).ConfigureAwait(false);
+            }
+
             nextAssistantText = $"{nextAssistantText} {nextQuestion.Text}";
         }
 
@@ -439,7 +448,16 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
         };
         await _store.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
         InterviewEvaluation presentedEvaluation = evaluation.RequiresTargetedFollowUp && !ready
-            ? evaluation with { Corrections = [] }
+            ? evaluation with
+            {
+                Gaps = [],
+                Rationale = TargetedFollowUpRationale,
+                Corrections = [],
+                Scores = evaluation.Scores.Select(static score => score with
+                {
+                    Rationale = TargetedFollowUpRationale,
+                }).ToArray(),
+            }
             : evaluation;
         return CreateResult(updated, null, nextQuestion, presentedEvaluation, null, ready);
     }
@@ -453,6 +471,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             .ConfigureAwait(false);
         if (session.Status != LearningSessionStatus.Active)
         {
+            await _profileRouter.EndSessionAsync(cancellationToken).ConfigureAwait(false);
             return CreateResult(
                 session,
                 LastOrDefault(session.TutorTurns),
@@ -472,7 +491,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             UpdatedAt = now,
         };
         await _store.SaveAsync(completed, cancellationToken).ConfigureAwait(false);
-        await TryEndProfileAsync().ConfigureAwait(false);
+        await _profileRouter.EndSessionAsync(cancellationToken).ConfigureAwait(false);
         return CreateResult(
             completed,
             LastOrDefault(completed.TutorTurns),
@@ -552,7 +571,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             throw new ProjectLearningException("interview_question_evidence_required");
         }
 
-        IReadOnlyList<string> concepts = NormalizeConcepts(output.ExpectedConcepts, claims);
+        IReadOnlyList<string> concepts = CreateGroundedConcepts(output.EvidenceIndexes, claims);
         return new InterviewQuestion(
             Guid.NewGuid(),
             sequence,
@@ -580,7 +599,10 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             : (double)demonstrated.Count / question.ExpectedConcepts.Count;
         int factual = ClampScore((int)Math.Round(ratio * 4, MidpointRounding.AwayFromZero) - incorrect.Count);
         int depth = ClampScore((int)Math.Round(ratio * 4, MidpointRounding.AwayFromZero));
-        string rationale = NormalizeGeneratedText(assessment.Rationale, "assessment_rationale_invalid");
+        string rationale = CreateAssessmentRationale(
+            demonstrated.Count,
+            question.ExpectedConcepts.Count,
+            incorrect.Count);
         List<DimensionScore> scores =
         [
             Score(ScoreDimension.ProjectFactualAccuracy, factual, "Correct project facts with calibrated uncertainty and no unsupported claims.", rationale),
@@ -616,7 +638,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             overall < 2.5 || incorrect.Count > 0 || gaps.Length > question.ExpectedConcepts.Count / 2);
     }
 
-    private static IReadOnlyList<LearningStatement> CreateCorrections(
+    private static LearningStatement[] CreateCorrections(
         InterviewAnswerAssessmentOutput assessment,
         IReadOnlyList<ProjectClaim> claims)
     {
@@ -625,22 +647,26 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             return [];
         }
 
-        string correction = NormalizeGeneratedText(assessment.Correction, "assessment_correction_invalid");
-        ProjectEvidence[] evidence = SelectEvidence(
-            assessment.CorrectionEvidenceIndexes,
-            claims);
-        if (evidence.Length == 0)
+        LearningStatement[] corrections = ValidIndexes(
+                assessment.CorrectionEvidenceIndexes,
+                claims.Count)
+            .OrderBy(static index => index)
+            .Select(index => claims[index])
+            .Where(static claim =>
+                claim.Classification == ProjectKnowledgeClassification.ProjectFact &&
+                claim.Evidence.Count > 0)
+            .Take(3)
+            .Select(static claim => new LearningStatement(
+                LearningStatementKind.ProjectFact,
+                claim.Statement,
+                claim.Evidence.Take(ProjectLearningLimits.MaximumTurnEvidenceItems).ToArray()))
+            .ToArray();
+        if (corrections.Length == 0)
         {
             throw new ProjectLearningException("assessment_correction_evidence_required");
         }
 
-        return
-        [
-            new LearningStatement(
-                LearningStatementKind.ProjectFact,
-                correction,
-                evidence),
-        ];
+        return corrections;
     }
 
     private TutorTurn CreateTutorTurn(
@@ -671,7 +697,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
         }
 
         List<LearningStatement> statements = [];
-        foreach (int index in ValidIndexes(output.EvidenceIndexes, claims.Count))
+        foreach (int index in ValidIndexes(output.EvidenceIndexes, claims.Count).OrderBy(static index => index))
         {
             ProjectClaim claim = claims[index];
             if (claim.Classification != ProjectKnowledgeClassification.ProjectFact ||
@@ -715,7 +741,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             interaction,
             explanation,
             question,
-            NormalizeConcepts(output.ExpectedConcepts, claims),
+            CreateGroundedConcepts(output.EvidenceIndexes, claims),
             statements,
             NormalizeLabels(output.ObservedStrengths),
             NormalizeLabels(output.ObservedGaps),
@@ -872,6 +898,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
     {
         HashSet<int> indexes = ValidIndexes(requestedIndexes, claims.Count);
         return indexes
+            .OrderBy(static index => index)
             .SelectMany(index => claims[index].Evidence)
             .DistinctBy(static evidence =>
                 $"{evidence.RelativePath}|{evidence.StartLine}|{evidence.EndLine}|{evidence.ContentHash}",
@@ -885,22 +912,46 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
             ? []
             : indexes.Where(index => index >= 0 && index < maximumExclusive).ToHashSet();
 
-    private static string[] NormalizeConcepts(
-        IReadOnlyList<string> concepts,
-        IReadOnlyList<ProjectClaim> claims)
-    {
-        string[] normalized = NormalizeLabels(concepts);
-        if (normalized.Length > 0)
-        {
-            return normalized;
-        }
-
-        return claims
-            .Where(static claim => claim.Classification == ProjectKnowledgeClassification.ProjectFact)
+    private static string[] CreateGroundedConcepts(
+        IReadOnlyList<int> evidenceIndexes,
+        IReadOnlyList<ProjectClaim> claims) =>
+        ValidIndexes(evidenceIndexes, claims.Count)
+            .OrderBy(static index => index)
+            .Select(index => claims[index])
+            .Where(static claim =>
+                claim.Classification == ProjectKnowledgeClassification.ProjectFact &&
+                claim.Evidence.Count > 0)
             .Select(static claim => NormalizeLabel(claim.Statement))
             .Where(static value => value.Length > 0)
-            .Take(4)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(ProjectLearningLimits.MaximumConcepts)
             .ToArray();
+
+    private static InterviewQuestion CreateTargetedFollowUpQuestion(
+        InterviewQuestion previousQuestion,
+        int sequence) => new(
+            Guid.NewGuid(),
+            sequence,
+            previousQuestion.Dimension,
+            "Re-examine your previous answer using the repository evidence. Which specific fact supports or contradicts your assumption, and why?",
+            previousQuestion.ExpectedConcepts,
+            previousQuestion.Evidence,
+            IsFollowUp: true,
+            previousQuestion.QuestionId);
+
+    private static string CreateAssessmentRationale(
+        int demonstratedConcepts,
+        int expectedConcepts,
+        int incorrectConcepts)
+    {
+        if (incorrectConcepts > 0)
+        {
+            return $"The response contradicted {incorrectConcepts} of {expectedConcepts} grounded expected concepts.";
+        }
+
+        return demonstratedConcepts == expectedConcepts
+            ? $"The response demonstrated all {expectedConcepts} grounded expected concepts."
+            : $"The response demonstrated {demonstratedConcepts} of {expectedConcepts} grounded expected concepts.";
     }
 
     private static string[] NormalizeLabels(IEnumerable<string>? labels) =>
@@ -1071,7 +1122,7 @@ public sealed class ProjectLearningService : IProjectLearningService, IDisposabl
         if (configuration.MaximumContextCharacters is < 4_096 or > 32_768 ||
             configuration.MaximumEvidenceItems is < 1 or > ProjectLearningLimits.MaximumEvidenceItems ||
             configuration.MaximumRecentTurns is < 1 or > 12 ||
-            configuration.MinimumInterviewQuestions is < 1 or > 10 ||
+            configuration.MinimumInterviewQuestions is < 5 or > 20 ||
             configuration.MaximumInterviewQuestions < configuration.MinimumInterviewQuestions ||
             configuration.MaximumInterviewQuestions > 20)
         {

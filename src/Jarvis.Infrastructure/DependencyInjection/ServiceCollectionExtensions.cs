@@ -123,7 +123,7 @@ public static class ServiceCollectionExtensions
                 options => options.MaximumContextCharacters is >= 4_096 and <= 24_000 &&
                     options.MaximumEvidenceItems is >= 1 and <= ProjectLearningLimits.MaximumEvidenceItems &&
                     options.MaximumRecentTurns is >= 1 and <= 12 &&
-                    options.MinimumInterviewQuestions is >= 1 and <= 20 &&
+                    options.MinimumInterviewQuestions is >= 5 and <= 20 &&
                     options.MaximumInterviewQuestions >= options.MinimumInterviewQuestions &&
                     options.MaximumInterviewQuestions <= 20,
                 "Project learning context and interview limits are invalid.")
@@ -212,9 +212,7 @@ public static class ServiceCollectionExtensions
             new Lazy<IProjectIntelligenceService>(
                 () => provider.GetRequiredService<IProjectIntelligenceService>())));
         services.AddSingleton<IAvailablePhysicalMemoryProvider, WindowsAvailablePhysicalMemoryProvider>();
-        services.AddSingleton<LocalModelProfileRouter>();
-        services.AddSingleton<IModelProfileRouter>(static provider =>
-            provider.GetRequiredService<LocalModelProfileRouter>());
+        services.AddSingleton<IModelProfileRouter, LocalModelProfileRouter>();
         services.AddSingleton<IProjectLearningSessionStore, SqliteProjectLearningSessionStore>();
         services.AddSingleton<IProjectLearningEvidenceSource, ProjectLearningEvidenceSource>();
         services.AddSingleton<IProjectLearningModel, LlamaProjectLearningModel>();
@@ -229,9 +227,7 @@ public static class ServiceCollectionExtensions
                 options.MinimumInterviewQuestions,
                 options.MaximumInterviewQuestions);
         });
-        services.AddSingleton<ProjectLearningService>();
-        services.AddSingleton<IProjectLearningService>(static provider =>
-            provider.GetRequiredService<ProjectLearningService>());
+        services.AddSingleton<IProjectLearningService, ProjectLearningService>();
         services.AddSingleton(static provider => new ProjectLearningToolExecutors(
             new Lazy<IProjectLearningService>(
                 () => provider.GetRequiredService<IProjectLearningService>())));

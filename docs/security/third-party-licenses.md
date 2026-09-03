@@ -1,6 +1,6 @@
 # Third-party runtime and model licenses
 
-This is the version 0.3 engineering inventory, not legal advice. JARVIS source control contains no third-party model weight or native runtime. The setup script downloads artifacts directly from their recorded upstream locations for local use. Any installer, redistribution, commercial distribution, or hosted model offering must repeat legal review and preserve the exact license/notice files shipped with the selected versions.
+This is the version 0.4 engineering inventory, not legal advice. JARVIS source control contains no third-party model weight or native runtime. The setup script downloads artifacts directly from their recorded upstream locations for local use. Any installer, redistribution, commercial distribution, or hosted model offering must repeat legal review and preserve the exact license/notice files shipped with the selected versions.
 
 | Component | Selected artifact | Upstream terms/provenance | Repository obligation |
 | --- | --- | --- | --- |

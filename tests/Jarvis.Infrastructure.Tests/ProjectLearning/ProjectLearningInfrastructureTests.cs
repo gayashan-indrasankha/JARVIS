@@ -68,6 +68,25 @@ public sealed class ProjectLearningInfrastructureTests
     }
 
     [Fact]
+    public async Task MemorySessionStoreHonorsCancellationBeforeReadingOrWriting()
+    {
+        using TemporaryHome temporary = new();
+        using SqliteProjectLearningSessionStore store = new(
+            JarvisDataPaths.Create(temporary.Path),
+            Options.Create(new ProjectLearningOptions { PersistSessions = false }));
+        ProjectLearningSessionSnapshot session = CreateSession(LearningSessionStatus.Active);
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.SaveAsync(session, cancellation.Token).AsTask());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.LoadAsync(session.SessionId, cancellation.Token).AsTask());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.LoadLatestCompletedInterviewAsync(session.RepositoryPath, cancellation.Token).AsTask());
+    }
+
+    [Fact]
     public async Task DeepProfileUnavailableFallsBackToFastWithoutRetryingDeep()
     {
         using TemporaryHome temporary = new();
@@ -233,6 +252,29 @@ public sealed class ProjectLearningInfrastructureTests
             "untrusted data",
             languageModel.Requests[0].Messages[0].Text,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LearningModelRejectsASecondMalformedOutputWithoutExecutingAnything()
+    {
+        FakeLanguageModel languageModel = new("not json", "still not json");
+        LlamaProjectLearningModel model = new(languageModel);
+
+        ProjectLearningException exception = await Assert.ThrowsAsync<ProjectLearningException>(() =>
+            model.GenerateTutorTurnAsync(
+                new TutorGenerationRequest(
+                    TutorLevel.Architecture,
+                    TutorInteractionKind.Explain,
+                    "architecture",
+                    null,
+                    false,
+                    [CreateClaim()],
+                    [],
+                    1_000),
+                CancellationToken.None).AsTask());
+
+        Assert.Equal("learning_model_output_invalid", exception.Code);
+        Assert.Equal(2, languageModel.Requests.Count);
     }
 
     private static ProjectLearningSessionSnapshot CreateSession(LearningSessionStatus status)

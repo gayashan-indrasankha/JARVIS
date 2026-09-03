@@ -42,6 +42,7 @@ internal sealed class SqliteProjectLearningSessionStore : IProjectLearningSessio
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!_options.PersistSessions)
         {
             lock (_memoryGate)
@@ -91,6 +92,7 @@ internal sealed class SqliteProjectLearningSessionStore : IProjectLearningSessio
         Guid sessionId,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!_options.PersistSessions)
         {
             lock (_memoryGate)
@@ -109,6 +111,7 @@ internal sealed class SqliteProjectLearningSessionStore : IProjectLearningSessio
         string repositoryPath,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!_options.PersistSessions)
         {
             lock (_memoryGate)

@@ -38,7 +38,12 @@ public sealed class ProjectLearningServiceTests
     public async Task WeakInterviewAnswerCreatesTargetedFollowUpInSameDimension()
     {
         Fixture fixture = new();
-        fixture.Model.Assessment = FakeLearningModel.WeakAssessment;
+        const string untrustedDisclosure = "The project uses a fabricated Redis cache.";
+        fixture.Model.Assessment = FakeLearningModel.WeakAssessment with
+        {
+            Rationale = untrustedDisclosure,
+            Correction = untrustedDisclosure,
+        };
         ProjectLearningTurnResult started = await fixture.Service.StartInterviewAsync(
             fixture.RepositoryPath,
             InterviewDifficulty.Junior,
@@ -55,9 +60,20 @@ public sealed class ProjectLearningServiceTests
         Assert.True(result.InterviewQuestion!.IsFollowUp);
         Assert.Equal(started.InterviewQuestion!.Dimension, result.InterviewQuestion.Dimension);
         Assert.Equal(started.InterviewQuestion.QuestionId, result.InterviewQuestion.ParentQuestionId);
+        Assert.Equal(["Project fact 0"], started.InterviewQuestion.ExpectedConcepts);
+        Assert.Equal(1, fixture.Model.QuestionGenerationCount);
         Assert.Empty(result.Evaluation.Corrections);
-        Assert.NotEmpty(fixture.Store.Sessions[started.SessionId].InterviewTurns[0]
-            .Evaluation.Corrections);
+        Assert.Empty(result.Evaluation.Gaps);
+        Assert.DoesNotContain(untrustedDisclosure, result.Evaluation.Rationale, StringComparison.Ordinal);
+        Assert.DoesNotContain(untrustedDisclosure, result.InterviewQuestion.Text, StringComparison.Ordinal);
+        Assert.All(result.Evaluation.Scores, score =>
+            Assert.DoesNotContain(untrustedDisclosure, score.Rationale, StringComparison.Ordinal));
+        ProjectLearningSessionSnapshot stored = fixture.Store.Sessions[started.SessionId];
+        LearningStatement correction = Assert.Single(stored.InterviewTurns[0].Evaluation.Corrections);
+        Assert.Equal("Project fact 0", correction.Text);
+        Assert.NotEmpty(correction.Evidence);
+        Assert.Contains("Project fact 0", stored.InterviewTurns[0].Evaluation.Gaps);
+        Assert.DoesNotContain(untrustedDisclosure, stored.Transcript[^1].Text, StringComparison.Ordinal);
         Assert.All(result.Evaluation.Scores, static score => Assert.InRange(score.Score, 0, 4));
         Assert.Equal(Enum.GetValues<ScoreDimension>().Length, result.Evaluation.Scores.Count);
     }
@@ -184,6 +200,34 @@ public sealed class ProjectLearningServiceTests
 
         await fixture.Service.EndSessionAsync(started.SessionId, CancellationToken.None);
         Assert.Equal(1, fixture.Profile.EndCount);
+    }
+
+    [Fact]
+    public async Task EndSessionDoesNotReportSuccessUntilProfileRestorationSucceeds()
+    {
+        Fixture fixture = new();
+        ProjectLearningTurnResult started = await fixture.Service.StartTutorAsync(
+            fixture.RepositoryPath,
+            TutorLevel.Foundation,
+            "overview",
+            false,
+            ModelProfile.Deep,
+            CancellationToken.None);
+        fixture.Profile.ThrowOnEnd = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.EndSessionAsync(started.SessionId, CancellationToken.None).AsTask());
+        Assert.Equal(
+            LearningSessionStatus.Completed,
+            fixture.Store.Sessions[started.SessionId].Status);
+
+        fixture.Profile.ThrowOnEnd = false;
+        ProjectLearningTurnResult retried = await fixture.Service.EndSessionAsync(
+            started.SessionId,
+            CancellationToken.None);
+
+        Assert.Equal(LearningSessionStatus.Completed, retried.Status);
+        Assert.Equal(2, fixture.Profile.EndCount);
     }
 
     [Fact]
@@ -317,6 +361,8 @@ public sealed class ProjectLearningServiceTests
 
         public IReadOnlyList<int> EvidenceIndexes { get; set; } = [0];
 
+        public int QuestionGenerationCount { get; private set; }
+
         public ValueTask<TutorGenerationOutput> GenerateTutorTurnAsync(
             TutorGenerationRequest request,
             CancellationToken cancellationToken)
@@ -338,6 +384,7 @@ public sealed class ProjectLearningServiceTests
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            QuestionGenerationCount++;
             return ValueTask.FromResult(new InterviewQuestionGenerationOutput(
                 request.IsFollowUp
                     ? "Which repository evidence corrects the gap in your previous answer?"
@@ -440,6 +487,8 @@ public sealed class ProjectLearningServiceTests
 
         public int EndCount { get; private set; }
 
+        public bool ThrowOnEnd { get; set; }
+
         public ValueTask<ModelProfileSelection> BeginSessionAsync(
             ModelProfile requestedProfile,
             CancellationToken cancellationToken)
@@ -457,6 +506,11 @@ public sealed class ProjectLearningServiceTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             EndCount++;
+            if (ThrowOnEnd)
+            {
+                throw new InvalidOperationException("Profile restoration failed.");
+            }
+
             return ValueTask.CompletedTask;
         }
     }

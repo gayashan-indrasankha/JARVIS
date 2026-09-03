@@ -187,8 +187,6 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
                 await StopProcessAsync().ConfigureAwait(false);
             }
 
-            _selectedProfile = profile;
-
             Uri endpoint = LoopbackEndpoint.Create(_options.Host, _options.Port);
             if (_options.RuntimeMode == LocalAiRuntimeMode.External)
             {
@@ -213,6 +211,7 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
                 }
 
                 _connection = external;
+                _selectedProfile = profile;
                 LlamaRuntimeLog.ExternalReady(_logger, endpoint.Port);
                 return external;
             }
@@ -246,6 +245,7 @@ internal sealed class LlamaServerSupervisor : ILlamaServerSupervisor
                 if (await WaitUntilReadyAsync(connection, cancellationToken).ConfigureAwait(false))
                 {
                     _connection = connection;
+                    _selectedProfile = profile;
                     LlamaRuntimeLog.Ready(_logger, contextSize);
                     return connection;
                 }

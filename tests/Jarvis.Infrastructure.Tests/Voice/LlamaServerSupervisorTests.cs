@@ -241,6 +241,32 @@ public sealed class LlamaServerSupervisorTests
         Assert.Equal("127.0.0.1", ValueAfter(start, "--host"));
     }
 
+    [Fact]
+    public async Task CancelledDeepSelectionKeepsFastAsTheDefaultProfile()
+    {
+        using TemporaryAssets temporary = new(includeModel: true, includeDeepModel: true);
+        FakeProcessFactory processes = new(initialExitStates: [false, false, false]);
+        await using LlamaServerSupervisor supervisor = CreateSupervisor(
+            temporary,
+            processes,
+            new FastOnlyHealthProbe(),
+            deepEnabled: true);
+        _ = await supervisor.SelectProfileAsync(ModelProfile.Fast, CancellationToken.None);
+        using CancellationTokenSource cancellation = new(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            supervisor.SelectProfileAsync(ModelProfile.Deep, cancellation.Token).AsTask());
+        LlamaServerConnection recovered = await supervisor.EnsureReadyAsync(CancellationToken.None);
+
+        Assert.Equal(ModelProfile.Fast, recovered.Profile);
+        Assert.Equal(3, processes.Starts.Count);
+        Assert.EndsWith(
+            "Qwen3-4B-Q4_K_M.gguf",
+            ValueAfter(processes.Starts[^1], "--model"),
+            StringComparison.Ordinal);
+        Assert.True(processes.Processes[1].WasKilled);
+    }
+
     private static LlamaServerSupervisor CreateSupervisor(
         TemporaryAssets temporary,
         FakeProcessFactory processes,
@@ -277,6 +303,17 @@ public sealed class LlamaServerSupervisorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(isReady);
+        }
+    }
+
+    private sealed class FastOnlyHealthProbe : ILlamaServerHealthProbe
+    {
+        public ValueTask<bool> IsReadyAsync(
+            LlamaServerConnection connection,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(connection.Profile == ModelProfile.Fast);
         }
     }
 

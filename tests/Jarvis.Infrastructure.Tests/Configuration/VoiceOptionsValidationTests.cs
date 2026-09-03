@@ -76,6 +76,7 @@ public sealed class VoiceOptionsValidationTests
     [InlineData("ProjectIntelligence:IndexTimeoutSeconds", "121")]
     [InlineData("ProjectLearning:MaximumEvidenceItems", "0")]
     [InlineData("ProjectLearning:MinimumInterviewQuestions", "0")]
+    [InlineData("ProjectLearning:MinimumInterviewQuestions", "4")]
     [InlineData("ProjectLearning:MaximumInterviewQuestions", "21")]
     [InlineData("ProjectLearning:OperationTimeoutSeconds", "121")]
     [InlineData("Jarvis:InstanceName", "unsafe instance\nname")]
