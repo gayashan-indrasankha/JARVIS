@@ -21,6 +21,7 @@ public sealed class LocalModelManifestTests
             .Select(static model => model.GetProperty("logicalId").GetString()!)
             .ToArray();
         Assert.Contains("qwen3-4b-q4-k-m", logicalIds, StringComparer.Ordinal);
+        Assert.Contains("qwen3-8b-q4-k-m", logicalIds, StringComparer.Ordinal);
         Assert.Contains("silero-vad-v4", logicalIds, StringComparer.Ordinal);
         Assert.Contains("zipformer-en-20m-int8", logicalIds, StringComparer.Ordinal);
         Assert.Contains("zipformer-gigaspeech-kws-3.3m-int8", logicalIds, StringComparer.Ordinal);
@@ -101,12 +102,35 @@ public sealed class LocalModelManifestTests
                 StringComparer.Ordinal);
 
         Assert.Equal("Apache-2.0", licenses["qwen3-4b-q4-k-m"]);
+        Assert.Equal("Apache-2.0", licenses["qwen3-8b-q4-k-m"]);
         Assert.Contains("LibriSpeech", licenses["zipformer-en-20m-int8"], StringComparison.Ordinal);
         Assert.Contains(
             "GigaSpeech XL",
             licenses["zipformer-gigaspeech-kws-3.3m-int8"],
             StringComparison.Ordinal);
         Assert.DoesNotContain("LibriSpeech", licenses["qwen3-4b-q4-k-m"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeepModelIsOptionalAndPinnedToAnImmutableRevision()
+    {
+        using JsonDocument manifest = LoadManifest();
+        JsonElement model = manifest.RootElement.GetProperty("models")
+            .EnumerateArray()
+            .Single(static candidate => string.Equals(
+                candidate.GetProperty("logicalId").GetString(),
+                "qwen3-8b-q4-k-m",
+                StringComparison.Ordinal));
+
+        Assert.True(model.GetProperty("optional").GetBoolean());
+        Assert.Equal(5_027_783_488, model.GetProperty("expectedBytes").GetInt64());
+        Assert.Contains(
+            "/6a569868d07d3bd59e8b97fb001bf8c0b254bb20/",
+            model.GetProperty("url").GetString(),
+            StringComparison.Ordinal);
+        Assert.Equal(
+            "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+            model.GetProperty("sha256").GetString());
     }
 
     [Fact]

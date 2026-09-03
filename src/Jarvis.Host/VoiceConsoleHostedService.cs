@@ -267,7 +267,7 @@ internal sealed class VoiceConsoleHostedService : BackgroundService
 
     private void WriteHelp()
     {
-        Console.WriteLine("JARVIS local 0.2 voice and typed-tool console");
+        Console.WriteLine("JARVIS local 0.4 voice, tools, project intelligence, and learning console");
         Console.WriteLine("/start  start a session manually (diagnostics)");
         Console.WriteLine("/stop   stop the active session");
         Console.WriteLine("/ptt    begin push-to-talk capture (push-to-talk mode)");

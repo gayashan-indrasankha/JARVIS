@@ -79,6 +79,20 @@ if (Test-Path -LiteralPath $qwenPath -PathType Leaf) {
     if (-not $valid) { throw 'Qwen3 checksum verification failed.' }
 }
 
+$deepQwen = $manifest.models | Where-Object logicalId -eq 'qwen3-8b-q4-k-m'
+$deepQwenPath = Join-Path $dataRoot "Models\Llm\$($deepQwen.expectedFilename)"
+if (Test-Path -LiteralPath $deepQwenPath -PathType Leaf) {
+    $deepSizeValid = (Get-Item -LiteralPath $deepQwenPath).Length -eq [long]$deepQwen.expectedBytes
+    $deepHashValid = (Get-FileHash -LiteralPath $deepQwenPath -Algorithm SHA256).Hash -eq
+        $deepQwen.sha256
+    Write-Host "Optional Qwen3 8B DEEP profile: $(if ($deepSizeValid -and $deepHashValid) { 'valid' } else { 'FAILED' })"
+    if (-not $deepSizeValid -or -not $deepHashValid) {
+        throw 'Optional Qwen3 8B checksum or size verification failed.'
+    }
+} else {
+    Write-Host 'Optional Qwen3 8B DEEP profile: not installed (FAST remains fully functional)'
+}
+
 try {
     $health = Invoke-RestMethod -Uri "http://127.0.0.1:${Port}/health" -TimeoutSec 2 -NoProxy
     Write-Host "llama-server health on 127.0.0.1:${Port}: ready"

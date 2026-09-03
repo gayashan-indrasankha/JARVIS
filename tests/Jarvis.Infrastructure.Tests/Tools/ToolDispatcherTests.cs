@@ -2,6 +2,7 @@ using System.Text.Json;
 using Jarvis.Core.Tools;
 using Jarvis.Infrastructure.Configuration;
 using Jarvis.Infrastructure.ProjectIntelligence;
+using Jarvis.Infrastructure.ProjectLearning;
 using Jarvis.Infrastructure.Tools;
 using Microsoft.Extensions.Options;
 
@@ -506,7 +507,9 @@ public sealed class ToolDispatcherTests
                 new GetGitStatusTool(pathPolicy, executables, new FakeProcessRunner()),
                 new ExecuteSafeCommandTool(executables, new FakeProcessRunner()),
                 Options.Create(new ProjectIntelligenceOptions()),
-                new ProjectToolExecutors());
+                new ProjectToolExecutors(),
+                Options.Create(new ProjectLearningOptions { Enabled = false }),
+                new ProjectLearningToolExecutors());
             Authorization = authorization ?? new RecordingAuthorizationPolicy(
                 ToolAuthorizationDecision.Allowed);
             Audit = new RecordingAuditSink();

@@ -1,6 +1,6 @@
 # Project Intelligence architecture
 
-Version 0.3 implements fully local, evidence-grounded analysis for approved C#/.NET Git repositories. Repository content never leaves the machine and never becomes an operating-system instruction. The local model can request ProjectTools, but only trusted code discovers files, builds the index, retrieves evidence, and enforces the existing authorization boundary.
+Version 0.3 implements fully local, evidence-grounded analysis for approved C#/.NET Git repositories. Version 0.4 consumes this service as the sole repository-fact source for [Project Learning](project-learning.md); learning never reads a repository through a separate path. Repository content never leaves the machine and never becomes an operating-system instruction. The local model can request ProjectTools, but only trusted code discovers files, builds the index, retrieves evidence, and enforces the existing authorization boundary.
 
 ## Runtime flow
 

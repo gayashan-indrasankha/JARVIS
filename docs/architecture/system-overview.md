@@ -1,13 +1,13 @@
 # System overview
 
-This is the authoritative boundary map for JARVIS through local version 0.3. JARVIS is one modular user-space .NET process. A supervised native inference child is an implementation detail, not a service tier or authority boundary.
+This is the authoritative boundary map for JARVIS through local version 0.4. JARVIS is one modular user-space .NET process. A supervised native inference child is an implementation detail, not a service tier or authority boundary.
 
 ## Physical projects
 
 | Project | Owns | May depend on | Must not own |
 | --- | --- | --- | --- |
-| `Jarvis.Core` | domain values, provider/platform-neutral ports, voice orchestration, typed tool contracts/agent loop, project evidence/query contracts, authorization categories, cancellation/generation semantics | .NET base class libraries | UI, HTTP, AI/model SDKs, Roslyn, SQLite, Windows APIs, logging, persistence, native types |
-| `Jarvis.Infrastructure` | local llama.cpp adapter/supervisor/planner, sherpa-onnx, Windows audio/tools, safe repository discovery, static project parsing, Roslyn analysis, SQLite/FTS retrieval, trusted registry, validation/policy/audit, configuration, structured metrics | Core and implementation packages | application composition, UI, model-defined policy/catalog, repository code execution |
+| `Jarvis.Core` | domain values, provider/platform-neutral ports, voice orchestration, typed tool contracts/agent loop, project evidence/query and learning/session/scoring contracts, authorization categories, cancellation/generation semantics | .NET base class libraries | UI, HTTP, AI/model SDKs, Roslyn, SQLite, Windows APIs, logging, persistence, native types |
+| `Jarvis.Infrastructure` | local llama.cpp adapter/supervisor/planner/profile routing, sherpa-onnx, Windows audio/tools, safe repository discovery, static project parsing, Roslyn analysis, SQLite/FTS retrieval/session persistence, trusted registry, validation/policy/audit, configuration, structured metrics | Core and implementation packages | application composition, UI, model-defined policy/catalog/scoring, repository code execution |
 | `Jarvis.Host` | Generic Host, configuration sources, DI composition, console commands, process lifetime | Core and Infrastructure | inference/audio protocol details, domain policy |
 | test projects | behavior fakes, adapter tests, architecture checks | corresponding production layers | real destructive OS actions or mandatory model/network/device dependencies |
 
@@ -20,7 +20,7 @@ Jarvis.Host ────────> Jarvis.Infrastructure ──────�
 
 No production cycle is permitted. Adding another project requires a cohesive implemented boundary and a documented reason; conceptual modules remain namespaces/components until then.
 
-## Runtime topology in 0.3
+## Runtime topology in 0.4
 
 ```text
 Interactive user
@@ -62,6 +62,16 @@ bounded discovery -> static project XML -> Roslyn AdhocWorkspace
                            existing typed dispatcher -> local Qwen
 ```
 
+Project learning reuses that dispatcher and evidence index:
+
+```text
+ProjectLearning typed tool -> ProjectLearningService
+       |                         |                |
+       |                         |                +--> local session SQLite
+       |                         +--> Project Intelligence evidence
+       +--> FAST/optional DEEP profile router -> one managed llama-server
+```
+
 The model endpoint is fixed loopback HTTP with proxying, redirects, cookies, remote hosts, wildcard binds, query/user-info endpoints, and external WebSockets rejected. Managed mode starts one pinned `llama-server` process on demand and terminates its process tree at session/host disposal. External mode can use an explicitly started server only on the same fixed loopback address.
 
 ## Conceptual modules
@@ -75,6 +85,7 @@ These are architectural responsibilities, not present-day projects:
 | Tool kernel | typed invocation, closed-schema validation, authorization, bounded execution, audit, loop protection | implemented 0.2 |
 | Platform | approved-root filesystem, fixed application/process/system/Git/diagnostic adapters | initial bounded slice implemented 0.2; writes/destructive/UI absent |
 | Project intelligence | approved-root static discovery, Roslyn analysis, SQLite/FTS retrieval/evidence | implemented 0.3 for C#/.NET |
+| Project learning | evidence-grounded tutoring, adaptive interview state, deterministic scoring/reporting, local persistence | implemented 0.4 |
 | Memory | provenance, retention, correction/deletion | not implemented |
 | Events | bounded background triggers/notifications | not implemented |
 
@@ -92,7 +103,7 @@ Voice inference is not a tool-execution bypass. A separate llama.cpp planner can
 
 ## Configuration and storage
 
-Tracked `appsettings.json` contains safe relative/logical defaults only. `JARVIS_` environment variables and command-line values can tune configuration; `JARVIS_HOME` selects a fully qualified non-root application-data directory. Tool filesystem access has no tracked root and is disabled by absence until the user supplies `Tools:AllowedRoots`. Project indexes are created only after an authorized `analyze_project` call and live under `Data\ProjectIntelligence`. Default storage is `%LOCALAPPDATA%\JARVIS` with `Models`, `Runtime`, `Data`, `Logs`, and `Cache` subtrees. Model weights, native binaries, runtime records, logs, databases, and indexes are never tracked.
+Tracked `appsettings.json` contains safe relative/logical defaults only. `JARVIS_` environment variables and command-line values can tune configuration; `JARVIS_HOME` selects a fully qualified non-root application-data directory. Tool filesystem access has no tracked root and is disabled by absence until the user supplies `Tools:AllowedRoots`. Project indexes are created only after an authorized `analyze_project` call and live under `Data\ProjectIntelligence`. Opt-in learning sessions live under `Data\ProjectLearning` and contain private transcript/evaluation data. Default storage is `%LOCALAPPDATA%\JARVIS` with `Models`, `Runtime`, `Data`, `Logs`, and `Cache` subtrees. Model weights, native binaries, runtime records, logs, databases, and indexes are never tracked.
 
 The tracked manifest identifies exact approved runtime/model artifacts. Setup is explicit. Normal application startup performs no installation or download and reports an actionable missing-component error.
 
@@ -105,4 +116,4 @@ The tracked manifest identifies exact approved runtime/model artifacts. Setup is
 - Platform/provider-native objects are created, used, and disposed inside Infrastructure.
 - Tests prove behavior at ports with fakes. Hardware/model integration remains an opt-in manual boundary.
 
-Detailed subsystem rules: [voice](voice.md), [security](security.md), [tool system](tool-system.md), and [project intelligence](project-intelligence.md).
+Detailed subsystem rules: [voice](voice.md), [security](security.md), [tool system](tool-system.md), [project intelligence](project-intelligence.md), and [project learning](project-learning.md).

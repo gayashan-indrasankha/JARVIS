@@ -1,8 +1,10 @@
 using Jarvis.Core.ProjectIntelligence;
+using Jarvis.Core.ProjectLearning;
 using Jarvis.Core.Tools;
 using Jarvis.Core.Voice;
 using Jarvis.Infrastructure.Configuration;
 using Jarvis.Infrastructure.ProjectIntelligence;
+using Jarvis.Infrastructure.ProjectLearning;
 using Jarvis.Infrastructure.Tools;
 using Jarvis.Infrastructure.Voice;
 using Jarvis.Infrastructure.Voice.Local;
@@ -103,6 +105,32 @@ public static class ServiceCollectionExtensions
                     options.GenerationTimeoutSeconds is >= 10 and <= 900 &&
                     options.MaximumOutputTokens is >= 1 and <= 4_096,
                 "LocalAi resource or timeout settings are invalid.")
+            .Validate(
+                options => options.Deep is not null &&
+                    IsSafeIdentifier(options.Deep.ModelId, 64) &&
+                    options.Deep.ContextSize is >= 4_096 and <= 16_384 &&
+                    options.Deep.GpuLayers is >= 0 and <= 99 &&
+                    options.Deep.Threads is >= 1 and <= 64 &&
+                    options.Deep.MinimumAvailableMemoryBytes is >= 2L * 1024 * 1024 * 1024 and
+                        <= 256L * 1024 * 1024 * 1024,
+                "LocalAi DEEP profile resource settings are invalid.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<ProjectLearningOptions>()
+            .Bind(configuration.GetSection(ProjectLearningOptions.SectionName))
+            .Validate(
+                options => options.MaximumContextCharacters is >= 4_096 and <= 24_000 &&
+                    options.MaximumEvidenceItems is >= 1 and <= ProjectLearningLimits.MaximumEvidenceItems &&
+                    options.MaximumRecentTurns is >= 1 and <= 12 &&
+                    options.MinimumInterviewQuestions is >= 5 and <= 20 &&
+                    options.MaximumInterviewQuestions >= options.MinimumInterviewQuestions &&
+                    options.MaximumInterviewQuestions <= 20,
+                "Project learning context and interview limits are invalid.")
+            .Validate(
+                options => options.MaximumPersistedSessions is >= 1 and <= 1_000 &&
+                    options.OperationTimeoutSeconds is >= 10 and <= 120,
+                "Project learning retention or timeout settings are invalid.")
             .ValidateOnStart();
 
         services
@@ -183,6 +211,26 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(static provider => new ProjectToolExecutors(
             new Lazy<IProjectIntelligenceService>(
                 () => provider.GetRequiredService<IProjectIntelligenceService>())));
+        services.AddSingleton<IAvailablePhysicalMemoryProvider, WindowsAvailablePhysicalMemoryProvider>();
+        services.AddSingleton<IModelProfileRouter, LocalModelProfileRouter>();
+        services.AddSingleton<IProjectLearningSessionStore, SqliteProjectLearningSessionStore>();
+        services.AddSingleton<IProjectLearningEvidenceSource, ProjectLearningEvidenceSource>();
+        services.AddSingleton<IProjectLearningModel, LlamaProjectLearningModel>();
+        services.AddSingleton(static provider =>
+        {
+            ProjectLearningOptions options = provider.GetRequiredService<
+                Microsoft.Extensions.Options.IOptions<ProjectLearningOptions>>().Value;
+            return new ProjectLearningConfiguration(
+                options.MaximumContextCharacters,
+                options.MaximumEvidenceItems,
+                options.MaximumRecentTurns,
+                options.MinimumInterviewQuestions,
+                options.MaximumInterviewQuestions);
+        });
+        services.AddSingleton<IProjectLearningService, ProjectLearningService>();
+        services.AddSingleton(static provider => new ProjectLearningToolExecutors(
+            new Lazy<IProjectLearningService>(
+                () => provider.GetRequiredService<IProjectLearningService>())));
         services.AddSingleton<ToolRegistry>();
         services.AddSingleton<IToolCatalog>(static provider =>
             provider.GetRequiredService<ToolRegistry>());

@@ -2,6 +2,7 @@
 param(
     [switch]$DownloadRuntime,
     [switch]$DownloadModels,
+    [switch]$DownloadDeepModel,
     [ValidateSet('cuda-12.4', 'cpu')]
     [string]$RuntimeVariant = 'cuda-12.4',
     [string]$JarvisHome
@@ -238,12 +239,24 @@ if ($DownloadRuntime) {
     }
 }
 
-if ($DownloadModels) {
+if ($DownloadModels -or $DownloadDeepModel) {
     foreach ($model in $manifest.models) {
+        if ($model.kind -ne 'language-model' -and -not $DownloadModels) {
+            continue
+        }
         switch ($model.kind) {
             'language-model' {
+                $isOptional = $null -ne $model.PSObject.Properties['optional'] -and
+                    [bool]$model.optional
+                if (($isOptional -and -not $DownloadDeepModel) -or
+                    (-not $isOptional -and -not $DownloadModels)) {
+                    continue
+                }
                 $destination = Join-Path $dataRoot "Models\Llm\$($model.expectedFilename)"
-                Get-VerifiedDownload $model.url $destination $model.sha256
+                $expectedBytes = if ($null -ne $model.PSObject.Properties['expectedBytes']) {
+                    [long]$model.expectedBytes
+                } else { 0 }
+                Get-VerifiedDownload $model.url $destination $model.sha256 $expectedBytes
             }
             'voice-activity-detection' {
                 $destination = Join-Path $dataRoot "Models\Vad\$($model.expectedFilename)"
@@ -290,6 +303,7 @@ $installationRecord = [ordered]@{
     approvedModelIds = @($manifest.models.logicalId)
     runtimeDownloadRequested = [bool]$DownloadRuntime
     modelDownloadsRequested = [bool]$DownloadModels
+    deepModelDownloadRequested = [bool]$DownloadDeepModel
 }
 $installationRecord | ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath (Join-Path $dataRoot 'installed-components.json') -Encoding utf8
@@ -297,8 +311,8 @@ $installationRecord | ConvertTo-Json -Depth 4 |
 Write-Host ''
 Write-Host 'Licenses include MIT, Apache-2.0, CC-BY-4.0 provenance, GPL-3.0 eSpeak NG data, and separate NVIDIA CUDA terms.'
 Write-Host 'Review docs\security\third-party-licenses.md before packaging or redistribution.'
-if (-not $DownloadRuntime -and -not $DownloadModels) {
-    Write-Host 'No downloads were requested. Re-run with -DownloadRuntime and/or -DownloadModels.'
+if (-not $DownloadRuntime -and -not $DownloadModels -and -not $DownloadDeepModel) {
+    Write-Host 'No downloads were requested. Re-run with -DownloadRuntime, -DownloadModels, and/or -DownloadDeepModel.'
 } else {
     Write-Host 'Requested local components are installed. Run scripts\diagnose-local-ai.ps1 next.'
 }

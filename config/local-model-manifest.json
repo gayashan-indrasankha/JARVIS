@@ -38,6 +38,23 @@
       "verifiedRuntimeVersion": "llama.cpp b10708"
     },
     {
+      "logicalId": "qwen3-8b-q4-k-m",
+      "kind": "language-model",
+      "optional": true,
+      "upstreamRepository": "Qwen/Qwen3-8B-GGUF",
+      "url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/6a569868d07d3bd59e8b97fb001bf8c0b254bb20/Qwen3-8B-Q4_K_M.gguf",
+      "expectedFilename": "Qwen3-8B-Q4_K_M.gguf",
+      "expectedBytes": 5027783488,
+      "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "quantization": "Q4_K_M",
+      "license": "Apache-2.0",
+      "purpose": "Optional deeper local project tutoring and mock interviews",
+      "recommendedContext": 6144,
+      "fallbackProfile": "qwen3-4b-q4-k-m",
+      "minimumHardwareProfile": "Windows x64, 16 GB RAM, at least 7 GiB available system memory; GPU offload optional",
+      "verifiedRuntimeVersion": "llama.cpp b10708"
+    },
+    {
       "logicalId": "silero-vad-v4",
       "kind": "voice-activity-detection",
       "upstreamRepository": "k2-fsa/sherpa-onnx",

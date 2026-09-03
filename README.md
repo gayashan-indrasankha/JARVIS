@@ -2,7 +2,7 @@
 
 JARVIS is a Windows-first, local-first personal computing agent built with C# and .NET 10. Codex is used to develop the repository and is never a JARVIS runtime dependency.
 
-Version **0.3 fully local Project Intelligence** retains the local voice and permission-controlled computer agent and adds opt-in analysis of approved C#/.NET Git repositories. Static project loading, Roslyn, incremental SHA-256 snapshots, SQLite/FTS5 retrieval, Git metadata, and evidence-grounded ProjectTools all run locally. Repository code, MSBuild targets, scripts, packages, and binaries are never executed merely to understand a project. File writes/deletion, arbitrary shell, administrator operations, memory, UI automation, interviews, and IoT are not implemented.
+Version **0.4 fully local Project Tutor and Mock Interviewer** retains local voice, the permission-controlled computer agent, and Project Intelligence, then adds progressive evidence-grounded tutoring, adaptive repository-specific interviews, deterministic scoring, reports/revision, and bounded local session persistence. FAST Qwen3-4B remains sufficient; an optional Qwen3-8B DEEP session profile can fall back safely. Repository code, targets, scripts, packages, and binaries are never executed merely to teach or interview. File writes/deletion, arbitrary shell, administrator operations, long-term memory, UI automation, and IoT are not implemented.
 
 After the user explicitly installs the pinned runtime and model assets, normal JARVIS operation requires no API key, paid API, cloud AI service, telemetry, model download, or Internet connection.
 
@@ -10,8 +10,8 @@ After the user explicitly installs the pinned runtime and model assets, normal J
 
 ```text
 src/
-  Jarvis.Core/            Provider/platform-neutral conversation, voice, tool, and project-evidence contracts
-  Jarvis.Infrastructure/  local AI/audio, Windows tools, Roslyn, SQLite/FTS, and safe project discovery
+  Jarvis.Core/            Provider/platform-neutral conversation, voice, tool, project evidence, and learning state/scoring
+  Jarvis.Infrastructure/  local AI/audio, Windows tools, Roslyn, SQLite/FTS/session persistence, profile routing, safe discovery
   Jarvis.Host/            .NET Generic Host composition root and console lifecycle
 tests/
   Jarvis.Core.Tests/      Orchestration, wake lifecycle, cancellation, segmentation, and boundary tests
@@ -75,6 +75,16 @@ Explicitly download the pinned CUDA llama.cpp runtime and all approved models:
 .\scripts\diagnose-local-ai.ps1
 ```
 
+That installs the required FAST profile only. The 5 GB-class DEEP model is never required or downloaded implicitly. To opt in explicitly:
+
+```powershell
+.\scripts\setup-local-ai.ps1 -DownloadDeepModel
+$env:JARVIS_LocalAi__Deep__Enabled = "true"
+.\scripts\diagnose-local-ai.ps1
+```
+
+DEEP is Qwen3-8B Q4_K_M with conservative defaults (6,144 context, 16 GPU layers, eight threads, 7 GiB minimum available RAM). These values require physical tuning; insufficient memory, a missing/disabled model, unsupported external mode, or startup failure returns the session to FAST rather than crashing JARVIS.
+
 Use `-RuntimeVariant cpu` when CUDA is unavailable. The setup is user-scoped and idempotent; it installs nothing system-wide. It verifies the authoritative checksums recorded in [the model manifest](config/local-model-manifest.json) when one is available. The wake-word archive is pinned by SHA-256 and byte length. The selected ASR Zipformer archive does not publish an authoritative checksum, so the script prominently reports that remaining supply-chain limitation.
 
 The application never downloads a missing component. `/start` instead reports: `Local model not installed. Run scripts/setup-local-ai.ps1.`
@@ -132,7 +142,7 @@ dotnet run --project src/Jarvis.Host/Jarvis.Host.csproj
 
 Use additional zero-based entries for more roots. `JARVIS_Tools__Enabled=false` disables the catalog; `JARVIS_Tools__AllowSafeLocalActions=false` keeps bounded reads but denies file/folder opening and application launch. Approved roots must be existing, fully qualified, non-root directories on a local drive; UNC/network roots, existing reparse points, ambiguous Win32 aliases, alternate data streams, and credential-oriented files/directories are rejected. Never commit local approved paths.
 
-The 0.2 tools remain `list_directory`, `find_files`, `get_file_metadata`, `open_file`, `open_folder`, `read_text_file`, `launch_application`, `list_processes`, `get_system_metrics`, `get_git_status`, and `execute_safe_command`. Version 0.3 adds `analyze_project`, `get_project_overview`, `search_project`, `find_symbol`, `explain_symbol`, `find_references`, `trace_dependency`, `trace_request_flow`, `list_api_endpoints`, `list_project_dependencies`, and `explain_architecture`. Every one uses the same registry, closed schema, validation, authorization, timeout, audit, and result-size boundary.
+The 0.2 tools remain `list_directory`, `find_files`, `get_file_metadata`, `open_file`, `open_folder`, `read_text_file`, `launch_application`, `list_processes`, `get_system_metrics`, `get_git_status`, and `execute_safe_command`. Version 0.3 adds `analyze_project`, `get_project_overview`, `search_project`, `find_symbol`, `explain_symbol`, `find_references`, `trace_dependency`, `trace_request_flow`, `list_api_endpoints`, `list_project_dependencies`, and `explain_architecture`. Version 0.4 adds `start_tutor_session`, `continue_tutor_session`, `start_interview_session`, `submit_interview_answer`, `end_learning_session`, and `start_revision_session`. Every one uses the same registry, closed schema, validation, authorization, timeout, audit, and result-size boundary.
 
 ## Analyze a local project
 
@@ -158,6 +168,21 @@ Project answers carry `PROJECT FACT`, `INFERENCE`, or `GENERAL SOFTWARE ENGINEER
 
 No secret is required. A managed llama-server receives a random per-process credential through its child environment for loopback defense in depth; it is never stored, placed on a command line, or logged.
 
+## Learn and interview locally
+
+Analyze the repository first, then use natural text or the same local wake/ASR/TTS path:
+
+- `Teach me this project's architecture.`
+- `Don't tell me the answer. Ask me questions.`
+- `Go deeper.` / `Show me the actual code that proves that.` / `Recap my weak areas.`
+- `Interview me about this project for a .NET internship. Ask five questions.`
+- `End the interview and show my weaknesses.`
+- `Teach me everything I got wrong.`
+
+Tutor levels cover foundation through interview defence. Interview levels are internship, junior, and mid-level stretch across fourteen project/engineering dimensions. Weak answers get targeted follow-ups before corrections are revealed. Project corrections require current Project Intelligence evidence; general principles and design alternatives are labeled separately. Trusted Core code derives ten 0–4 rubric scores from bounded concept/quality signals, rather than accepting arbitrary model scores.
+
+Learning operations are `SAFE_LOCAL_ACTION` because they write private local session data and may replace the one managed model process. `ProjectLearning:PersistSessions=false` keeps state process-local. `ProjectLearning:Enabled=false` removes the six learning tools. See the [Project Learning architecture](docs/architecture/project-learning.md) for contracts and limits.
+
 ## Storage and privacy
 
 The data-root layout is:
@@ -168,13 +193,14 @@ The data-root layout is:
   Runtime\LlamaCpp\
   Data\
     ProjectIntelligence\project-index.db
+    ProjectLearning\project-learning.db
   Logs\
   Cache\
 ```
 
-Normal runtime makes only fixed `http://127.0.0.1:<port>` llama-server requests. It contains no external HTTP/WebSocket client path, cloud AI SDK, telemetry, updater, or background downloader. Setup is the sole intentional external-download workflow. Project indexes stay under `JARVIS_HOME\Data\ProjectIntelligence`, never inside a repository; they contain source-derived local data and can be deleted by the user when JARVIS is stopped. Structured metrics include timing, counts, context size, lifecycle, and sanitized failure classes; raw audio, transcripts, prompts, responses, hidden reasoning, repository content/queries/paths, credentials, and machine identity are not logged by default. Console transcripts and evidence are visible to the interactive user and can be persisted if that user redirects console output.
+Normal runtime makes only fixed `http://127.0.0.1:<port>` llama-server requests. It contains no external HTTP/WebSocket client path, cloud AI SDK, telemetry, updater, or background downloader. Setup is the sole intentional external-download workflow. Project indexes stay under `JARVIS_HOME\Data\ProjectIntelligence`; learning sessions stay under `JARVIS_HOME\Data\ProjectLearning`; neither is stored inside a repository. The learning database contains private repository paths, questions, answers, scores, weaknesses, and evidence-derived text and can be deleted while JARVIS is stopped. Structured metrics include timing, counts, context size, lifecycle, profile/reason codes, and sanitized failure classes; raw audio, transcripts, prompts, responses, hidden reasoning, repository content/queries/paths, credentials, and machine identity are not logged by default. Console transcripts and evidence are visible to the interactive user and can be persisted if that user redirects console output.
 
-See [security](docs/architecture/security.md), [tool architecture](docs/architecture/tool-system.md), [voice architecture](docs/architecture/voice.md), [Project Intelligence](docs/architecture/project-intelligence.md), [ADR 0002](docs/decisions/0002-local-inference-and-speech-runtime.md), [ADR 0003](docs/decisions/0003-local-wake-word-activation.md), [ADR 0004](docs/decisions/0004-permission-controlled-local-tool-kernel.md), and [ADR 0005](docs/decisions/0005-local-project-intelligence-index.md) for the exact guarantees and trust boundaries.
+See [security](docs/architecture/security.md), [tool architecture](docs/architecture/tool-system.md), [voice architecture](docs/architecture/voice.md), [Project Intelligence](docs/architecture/project-intelligence.md), [Project Learning](docs/architecture/project-learning.md), and [the ADR index](docs/decisions/README.md) for the exact guarantees and trust boundaries.
 
 Third-party model/runtime licenses and redistribution obligations are inventoried in [third-party licenses](docs/security/third-party-licenses.md). The current repository downloads assets for local use and does not itself redistribute them; packaging requires a fresh bill-of-materials and legal review.
 
@@ -188,9 +214,10 @@ Third-party model/runtime licenses and redistribution obligations are inventorie
 - Project loading intentionally supports SDK-style C# discovery through static XML and Roslyn source analysis; conditional MSBuild evaluation, generated source, non-C# semantic analysis, compile-time generator output, runtime call graphs, and vector search are not part of 0.3.
 - Static request/dependency traces are best-effort. Dynamic dispatch, reflection, middleware branches, configuration-selected providers, and unresolved packages may require an explicit `INFERENCE` or manual runtime verification.
 - Confirmation-class policies fail closed because 0.3 has no interactive grant surface. The implemented catalog contains only bounded reads and optional safe local actions; writes, deletion, arbitrary commands, elevation, credentials, and UI automation are absent.
+- Tutor/interview quality, five-question spoken continuity, persisted-session recovery on the target machine, and DEEP 8B fit/latency/fallback require the manual 0.4 test. DEEP is disabled and absent by default.
 - Wake-word capture uses one CPU inference thread, but actual idle CPU/battery use must be measured on target laptops. The assistant speaker may retrigger or mask the microphone because echo cancellation is not implemented; headphones are the reliable baseline.
 
-Use the [manual local voice smoke test](docs/testing/manual-voice-smoke-test.md), [wake-word matrix](docs/testing/manual-wake-word-test-matrix.md), [manual tool smoke test](docs/testing/manual-tool-smoke-test.md), and [Project Intelligence smoke test](docs/testing/manual-project-intelligence-smoke-test.md) before declaring a machine validated. Contributor instructions are in [AGENTS.md](AGENTS.md).
+Use the [manual local voice smoke test](docs/testing/manual-voice-smoke-test.md), [wake-word matrix](docs/testing/manual-wake-word-test-matrix.md), [manual tool smoke test](docs/testing/manual-tool-smoke-test.md), [Project Intelligence smoke test](docs/testing/manual-project-intelligence-smoke-test.md), and [Project Learning smoke test](docs/testing/manual-project-learning-smoke-test.md) before declaring a machine validated. Contributor instructions are in [AGENTS.md](AGENTS.md).
 
 ## Documentation map
 
@@ -201,4 +228,5 @@ Use the [manual local voice smoke test](docs/testing/manual-voice-smoke-test.md)
 - [Tool system](docs/architecture/tool-system.md)
 - [Voice architecture](docs/architecture/voice.md)
 - [Project intelligence](docs/architecture/project-intelligence.md)
+- [Project learning](docs/architecture/project-learning.md)
 - [Architecture decisions](docs/decisions/README.md)

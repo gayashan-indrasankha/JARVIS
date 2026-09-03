@@ -90,7 +90,7 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
         HttpClient client = _client ?? throw new InvalidOperationException(
             "The local language model client was not initialized.");
 
-        LlamaChatRequest payload = CreateRequest(request);
+        LlamaChatRequest payload = CreateRequest(request, _connection!.ModelId);
         using HttpRequestMessage message = new(HttpMethod.Post, "v1/chat/completions")
         {
             Content = JsonContent.Create(payload),
@@ -283,7 +283,9 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
         await _supervisor.DisposeAsync().ConfigureAwait(false);
     }
 
-    private static LlamaChatRequest CreateRequest(LanguageModelRequest request)
+    private static LlamaChatRequest CreateRequest(
+        LanguageModelRequest request,
+        string modelId)
     {
         List<LlamaChatMessage> messages = request.Messages
             .Select(static message => new LlamaChatMessage(
@@ -309,7 +311,7 @@ internal sealed class LlamaCppLocalLanguageModel : ILanguageModel
         }
 
         return new LlamaChatRequest(
-            LocalAssetPaths.SupportedLanguageModelId,
+            modelId,
             messages,
             request.MaximumOutputTokens,
             Stream: true,

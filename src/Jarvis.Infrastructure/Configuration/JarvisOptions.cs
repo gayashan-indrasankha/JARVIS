@@ -43,6 +43,23 @@ public sealed class LocalAiOptions
     public int GenerationTimeoutSeconds { get; set; } = 300;
 
     public int MaximumOutputTokens { get; set; } = 512;
+
+    public DeepModelOptions Deep { get; set; } = new();
+}
+
+public sealed class DeepModelOptions
+{
+    public bool Enabled { get; set; }
+
+    public string ModelId { get; set; } = "qwen3-8b-q4-k-m";
+
+    public int ContextSize { get; set; } = 6_144;
+
+    public int GpuLayers { get; set; } = 16;
+
+    public int Threads { get; set; } = 8;
+
+    public long MinimumAvailableMemoryBytes { get; set; } = 7L * 1024 * 1024 * 1024;
 }
 
 public sealed class VoiceOptions
@@ -167,4 +184,27 @@ public sealed class ProjectIntelligenceOptions
     public int IndexTimeoutSeconds { get; set; } = 120;
 
     public int QueryTimeoutSeconds { get; set; } = 15;
+}
+
+public sealed class ProjectLearningOptions
+{
+    public const string SectionName = "ProjectLearning";
+
+    public bool Enabled { get; set; } = true;
+
+    public bool PersistSessions { get; set; } = true;
+
+    public int MaximumContextCharacters { get; set; } = 12_000;
+
+    public int MaximumEvidenceItems { get; set; } = 10;
+
+    public int MaximumRecentTurns { get; set; } = 6;
+
+    public int MinimumInterviewQuestions { get; set; } = 5;
+
+    public int MaximumInterviewQuestions { get; set; } = 20;
+
+    public int MaximumPersistedSessions { get; set; } = 50;
+
+    public int OperationTimeoutSeconds { get; set; } = 120;
 }

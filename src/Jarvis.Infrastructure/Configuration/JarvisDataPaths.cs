@@ -20,6 +20,7 @@ public sealed class JarvisDataPaths
         LlamaCppRuntime = Path.Combine(Runtime, "LlamaCpp");
         Data = Path.Combine(root, "Data");
         ProjectIndexes = Path.Combine(Data, "ProjectIntelligence");
+        ProjectLearningData = Path.Combine(Data, "ProjectLearning");
         Logs = Path.Combine(root, "Logs");
         Cache = Path.Combine(root, "Cache");
     }
@@ -45,6 +46,8 @@ public sealed class JarvisDataPaths
     public string Data { get; }
 
     public string ProjectIndexes { get; }
+
+    public string ProjectLearningData { get; }
 
     public string Logs { get; }
 

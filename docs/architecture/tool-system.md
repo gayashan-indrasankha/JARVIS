@@ -4,7 +4,7 @@
 
 Tools are the only route from local reasoning to operating-system observation or action. A model proposes a narrow JSON request; trusted application code decides whether anything runs. Catalog membership never implies permission, local inference never implies trust, and no model adapter owns an OS handle or executor.
 
-Version 0.2 implemented the first bounded tool kernel and Windows adapter slice. Version 0.3 reuses that same module for local Project Intelligence rather than creating a bypass, plugin shell, or microservice.
+Version 0.2 implemented the first bounded tool kernel and Windows adapter slice. Versions 0.3 and 0.4 reuse that same module for local Project Intelligence and Project Learning rather than creating a bypass, plugin shell, or microservice.
 
 ## Dependency and trust boundaries
 
@@ -25,7 +25,7 @@ untrusted user/ASR text
 
 The model receives tool names, descriptions, and closed JSON schemas. It does not receive an executor, `Process`, filesystem object, `IServiceProvider`, PowerShell, a native llama tool runner, or a way to register catalog entries. Provider response objects terminate in Infrastructure.
 
-## Catalog through 0.3
+## Catalog through 0.4
 
 The catalog is constructed from reviewed code and exposes exactly:
 
@@ -53,10 +53,16 @@ The catalog is constructed from reviewed code and exposes exactly:
 | `list_api_endpoints` | bounded endpoint facts | `SAFE_READ` |
 | `list_project_dependencies` | static project/package facts | `SAFE_READ` |
 | `explain_architecture` | bounded project/DI/API/data/test evidence | `SAFE_READ` |
+| `start_tutor_session` | create a grounded local tutor session | `SAFE_LOCAL_ACTION` |
+| `continue_tutor_session` | progress the named tutor session | `SAFE_LOCAL_ACTION` |
+| `start_interview_session` | create a grounded adaptive interview | `SAFE_LOCAL_ACTION` |
+| `submit_interview_answer` | evaluate/store one answer and produce the next question | `SAFE_LOCAL_ACTION` |
+| `end_learning_session` | complete a session and store/report results | `SAFE_LOCAL_ACTION` |
+| `start_revision_session` | create a tutor session from latest interview weaknesses | `SAFE_LOCAL_ACTION` |
 
 Contracts reject unknown members and enum values. The safe-command enum contains only `dotnet_info`, `dotnet_version`, and `git_version`. It has no program, argument, working-directory, environment, shell, or elevation field. Dedicated structured tools must be used when they exist.
 
-ProjectTools do not broaden the process boundary: analysis never evaluates MSBuild, restores/builds, runs generators/tests/scripts, loads repository binaries, or sends content over a network. Writes, repository mutation, deletion, termination, administrator shell, credential access, generic command execution, UI automation, network access, and arbitrary application paths are not implemented.
+Project and learning tools do not broaden the process boundary: analysis never evaluates MSBuild, restores/builds, runs generators/tests/scripts, loads repository binaries, or sends content over a network. Learning tools read evidence only through Project Intelligence, persist bounded private state under `JARVIS_HOME`, and use the supervised local model. Writes, repository mutation, deletion, termination, administrator shell, credential access, generic command execution, UI automation, network access, and arbitrary application paths are not implemented.
 
 ## Required execution order
 

@@ -116,3 +116,24 @@ internal static class ProjectToolSchemas
     public const string ListEndpoints =
         """{"type":"object","additionalProperties":false,"required":["repositoryPath"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"maximumResults":{"type":"integer","minimum":1,"maximum":256,"default":100}}}""";
 }
+
+internal static class ProjectLearningToolSchemas
+{
+    public const string StartTutor =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"level":{"type":"string","enum":["foundation","architecture","feature_flow","implementation","database","security","testing","failure_handling","scalability","trade_offs","interview_defence"],"default":"foundation"},"topic":{"type":"string","minLength":1,"maxLength":256,"default":"project overview"},"askBeforeTell":{"type":"boolean","default":false},"profile":{"type":"string","enum":["fast","deep"],"default":"fast"}}}""";
+
+    public const string ContinueTutor =
+        """{"type":"object","additionalProperties":false,"required":["sessionId","interaction","userInput"],"properties":{"sessionId":{"type":"string","format":"uuid"},"interaction":{"type":"string","enum":["explain","go_deeper","ask_question","self_explanation","show_evidence","recap"]},"userInput":{"type":"string","minLength":1,"maxLength":8192}}}""";
+
+    public const string StartInterview =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"difficulty":{"type":"string","enum":["internship","junior","mid_level_stretch"],"default":"internship"},"questionCount":{"type":"integer","minimum":5,"maximum":20,"default":5},"profile":{"type":"string","enum":["fast","deep"],"default":"fast"}}}""";
+
+    public const string SubmitAnswer =
+        """{"type":"object","additionalProperties":false,"required":["sessionId","answer"],"properties":{"sessionId":{"type":"string","format":"uuid"},"answer":{"type":"string","minLength":1,"maxLength":8192}}}""";
+
+    public const string EndSession =
+        """{"type":"object","additionalProperties":false,"required":["sessionId"],"properties":{"sessionId":{"type":"string","format":"uuid"}}}""";
+
+    public const string StartRevision =
+        """{"type":"object","additionalProperties":false,"required":["repositoryPath"],"properties":{"repositoryPath":{"type":"string","minLength":1,"maxLength":2048},"profile":{"type":"string","enum":["fast","deep"],"default":"fast"}}}""";
+}

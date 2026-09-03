@@ -28,6 +28,6 @@ Voice interaction should have low perceived latency: speech start/end is detecte
 
 The persona is calm, concise, professional, technically precise, and honest about capability. It does not reveal hidden reasoning or claim that an action completed without a confirmed tool result.
 
-## Current 0.3 scope
+## Current 0.4 scope
 
-Version 0.3 retains the local voice vertical slice and permission-controlled typed tool kernel, then adds opt-in local C#/.NET Project Intelligence. Approved repositories are discovered and indexed without evaluating MSBuild or executing repository content; answers use bounded Roslyn/FTS evidence with file and line provenance. It does not provide writes, deletion, arbitrary shell, elevation, credential access, persistent memory, GUI automation, or IoT. See [the roadmap](roadmap.md) for staged scope.
+Version 0.4 retains the local voice vertical slice, permission-controlled typed tool kernel, and C#/.NET Project Intelligence, then adds evidence-grounded Project Tutor and adaptive Mock Interview sessions. FAST remains the complete 4B baseline; an optional memory-gated 8B DEEP profile falls back locally. Learning history can persist in a bounded local database. It does not provide writes, deletion, arbitrary shell, elevation, credential access, general long-term memory, GUI automation, or IoT. See [the roadmap](roadmap.md) for staged scope.

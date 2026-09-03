@@ -6,6 +6,7 @@ namespace Jarvis.Infrastructure.Voice.Local;
 internal sealed class LocalAssetPaths(JarvisDataPaths paths)
 {
     public const string SupportedLanguageModelId = "qwen3-4b-q4-k-m";
+    public const string SupportedDeepLanguageModelId = "qwen3-8b-q4-k-m";
     public const string SupportedSpeechProfile = "zipformer-en-20m-int8";
     public const string SupportedWakeWordProfile =
         "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01";
@@ -15,6 +16,9 @@ internal sealed class LocalAssetPaths(JarvisDataPaths paths)
 
     public string LanguageModel =>
         JarvisDataPaths.ResolveUnder(paths.LlmModels, "Qwen3-4B-Q4_K_M.gguf");
+
+    public string DeepLanguageModel =>
+        JarvisDataPaths.ResolveUnder(paths.LlmModels, "Qwen3-8B-Q4_K_M.gguf");
 
     public string VadModel =>
         JarvisDataPaths.ResolveUnder(paths.VadModels, "silero_vad.onnx");

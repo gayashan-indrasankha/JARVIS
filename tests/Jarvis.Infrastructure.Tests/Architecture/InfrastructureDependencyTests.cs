@@ -2,6 +2,7 @@ using System.Reflection;
 using Jarvis.Core.ProjectIntelligence;
 using Jarvis.Core.Tools;
 using Jarvis.Infrastructure.Configuration;
+using Jarvis.Infrastructure.ProjectLearning;
 using Jarvis.Infrastructure.Voice.Local.Llama;
 
 namespace Jarvis.Infrastructure.Tests.Architecture;
@@ -33,6 +34,7 @@ public sealed class InfrastructureDependencyTests
         [
             typeof(LlamaCppLocalLanguageModel),
             typeof(LlamaCppAgentPlanner),
+            typeof(LlamaProjectLearningModel),
         ];
         Type[] forbiddenContracts =
         [
